@@ -209,7 +209,11 @@ def discretize(workspace, discretization_name):
                                           intermediate_discretization_3)
 
         # Delete extra FID field created from FeatureToPolygon
-        # Set gridcode
+        # Delete the gridcode field because it is empty and will be re-added with the Identity tool
+        fields = "FID_{};gridcode".format(intermediate_discretization_2)
+        tweet("Deleting unnecessary discretization fields")
+        tweet(fields)
+        arcpy.management.DeleteField(intermediate_discretization_3, fields, "DELETE_FIELDS")
 
         intermediate_discretization_4 = "intermediate_{}_4_identity".format(discretization_name)
         tweet("Updating gridcode")
@@ -219,7 +223,6 @@ def discretize(workspace, discretization_name):
         # Clip output from FeatureToPolygon because it can create excess polygons where holes in existing features
         # exists with two vertices that are coincident. The newly created feature is not part of the original
         # delineation or discretization and should be removed.
-
         intermediate_discretization_5 = "intermediate_{}_5_clip".format(discretization_name)
         arcpy.analysis.PairwiseClip(intermediate_discretization_4, delineation, intermediate_discretization_5)
 
@@ -239,6 +242,46 @@ def discretize(workspace, discretization_name):
             arcpy.Delete_management(intermediate_discretization_4)
         if intermediate_discretization_5:
             arcpy.Delete_management(intermediate_discretization_5)
+
+        # Assign the elementID to each element in the elements feature class
+        # Elements ending in 1 are uplands
+        # Elements ending in 2 are laterals on the right
+        # Elements ending in 3 are laterals on the left
+        tweet("Assigning elementID to elements")
+        # discretization_feature_class = "{}_elements".format(discretization)
+        # fields = ["GRIDCODE", "ElementID"]
+        # row = None
+        # with arcpy.da.UpdateCursor(discretization_feature_class, fields) as cursor:
+        #     for row in cursor:
+        #         if row[0] == 1:
+        #             row[1] = row[0]
+        #         else:
+        #             onRight = True
+        #             onLeft = False
+        #             if onRight:
+        #                 row[1] = row[0] + 2
+        #             elif onLeft:
+        #                 row[1] = row[0] + 3
+        #     if row is None:
+        #         msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
+        #             meta_workspace_table, "DelineationWorkspace", workspace)
+        #         tweet(msg)
+        #         raise Exception(msg)
+
+    # Assign the streamID to each stream in the streams feature class
+    tweet("Assigning StreamID to streams")
+    stream_id_field = "StreamID"
+    arcpy.management.AddField(streams_feature_class, stream_id_field, "LONG", None, None, None, '', "NULLABLE",
+                              "NON_REQUIRED", '')
+    # Distinguishing the expression_type between ArcMap and ArcGIS Pro is not strictly necessary.
+    # ArcGIS Pro supports the PYTHON_9.3 keyword for backward compatibility, though it is not listed as a choice
+    # See: https://pro.arcgis.com/en/pro-app/latest/tool-reference/data-management/calculate-field-examples.htm
+    arcmap = False
+    if arcmap:
+        expression_type = "PYTHON_9.3"
+    else:
+        expression_type = "PYTHON3"
+    arcpy.management.CalculateField(streams_feature_class, stream_id_field, "(!grid_code! * 10) + 4", expression_type)
 
     # Set the output parameter so the discretization can be added to the map
     arcpy.SetParameter(9, discretization_feature_class)
