@@ -56,7 +56,6 @@ def initialize_workspace(workspace, delineation_name, discretization_name, model
 
 def discretize(workspace, discretization_name):
     tweet("Reading workspace metadata")
-    tweet(arcpy.env.workspace)
     meta_workspace_table = os.path.join(workspace, "metaWorkspace")
     if not arcpy.Exists(meta_workspace_table):
         # Short-circuit and leave message
@@ -113,24 +112,20 @@ def discretize(workspace, discretization_name):
 
     # Process: Raster Calculator
     tweet("Creating streams raster")
-    tweet("Workspace: %s" % arcpy.env.workspace)
-    tweet("Scratch Workspace: %s" % arcpy.env.scratchWorkspace)
-    tweet("Scratch Geodatabase: %s" % arcpy.env.scratchGDB)
-    tweet("Scratch Folder: %s" % arcpy.env.scratchFolder)
+    # tweet("Scratch Workspace: %s" % arcpy.env.scratchWorkspace)
+    # tweet("Scratch Geodatabase: %s" % arcpy.env.scratchGDB)
+    # tweet("Scratch Folder: %s" % arcpy.env.scratchFolder)
+    # TODO: Determine if map algebra should not be used because it writes the output to an unpredictable temp directory
+    #  in at the %temp% Windows directory.
     streams_raster = arcpy.Raster(fl_up_raster) > float(threshold)
-    tweet("streams raster: %s" % streams_raster)
+    # tweet("streams raster: %s" % streams_raster)
     if save_intermediate_outputs_par:
         streams_raster_output = "intermediate_{}_StreamsRaster".format(discretization_name)
         streams_raster.save(streams_raster_output)
 
     # Process: Stream Link
     tweet("Creating stream links raster")
-    tweet("Workspace: %s" % arcpy.env.workspace)
-    tweet("Scratch Workspace: %s" % arcpy.env.scratchWorkspace)
-    tweet("Scratch Geodatabase: %s" % arcpy.env.scratchGDB)
-    tweet("Scratch Folder: %s" % arcpy.env.scratchFolder)
     stream_link_raster = arcpy.sa.StreamLink(streams_raster, flow_direction_raster)
-    tweet("stream link raster: %s" % stream_link_raster)
     if save_intermediate_outputs_par:
         stream_link_output = "intermediate_{}_streamLinkRaster".format(discretization_name)
         stream_link_raster.save(stream_link_output)
@@ -150,11 +145,16 @@ def discretize(workspace, discretization_name):
     # set containing to_node without duplicates
     to_set = {r[0] for r in arcpy.da.SearchCursor(streams_feature_class, "to_node")}
     missing_to_node = list(to_set.difference(from_set))[0]
+    # tweet("from_set: %s" % from_set)
+    # tweet("to_set: %s" % to_set)
+    # tweet("outlet: %s" % missing_to_node)
 
-    # fields = ["SHAPE@", "GRIDCODE", "Element_ID"]
-    # with arcpy.da.SearchCursor(streams_feature_class, fields) as nodes_cursor:
-    #     for node_row in nodes_cursor:
-    #         coord = node_row[0].lastPoint
+    fields = ["SHAPE@", "arcid", "grid_code", "from_node", "to_node"]
+    expression = "{0} = {1}".format(arcpy.AddFieldDelimiters(workspace, "to_node"), missing_to_node)
+    with arcpy.da.SearchCursor(streams_feature_class, fields, expression) as streams_cursor:
+        for stream_row in streams_cursor:
+            with arcpy.da.InsertCursor(nodes_feature_class, fields) as cursor:
+                cursor.insertRow((stream_row[0].lastPoint, stream_row[1], stream_row[2], stream_row[3], stream_row[4]))
 
     # Process: Stream Order
     tweet("Creating stream orders raster")
@@ -172,8 +172,6 @@ def discretize(workspace, discretization_name):
 
     # Process: Zonal Fill
     tweet("Creating minimum flow accumulation zones raster of stream links")
-    tweet(stream_link_raster)
-    tweet(flow_accumulation_raster)
     minimum_fa_zones_raster = arcpy.sa.ZonalFill(stream_link_raster, flow_accumulation_raster)
     if save_intermediate_outputs_par:
         minimum_fa_zones_output = "intermediate_{}_faZones".format(discretization_name)
