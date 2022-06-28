@@ -3,6 +3,7 @@ from __future__ import print_function, unicode_literals, absolute_import
 
 import arcpy
 import os
+import datetime
 
 # Check out any necessary licenses
 arcpy.CheckOutExtension("spatial")
@@ -12,11 +13,13 @@ delineation_par = arcpy.GetParameterAsText(0)
 model_par = arcpy.GetParameterAsText(1)
 method_par = arcpy.GetParameterAsText(2)
 threshold_par = float(arcpy.GetParameterAsText(3))
-internalPourPoints_par = arcpy.GetParameterAsText(4)
-discretizationName_par = arcpy.GetParameterAsText(5)
+internal_pour_points_par = arcpy.GetParameterAsText(4)
+discretization_name_par = arcpy.GetParameterAsText(5)
 environment_par = arcpy.GetParameterAsText(6)
-outputWorkspace_par = arcpy.GetParameterAsText(7)
-saveIntermediateOutputs_par = bool(arcpy.GetParameterAsText(8))
+workspace_par = arcpy.GetParameterAsText(7)
+save_intermediate_outputs_par = bool(arcpy.GetParameterAsText(8))
+
+arcpy.env.workspace = workspace_par
 
 
 def tweet(msg):
@@ -29,90 +32,95 @@ def tweet(msg):
     print(arcpy.GetMessages())
 
 
-def initialize_workspace(workspace):
+def initialize_workspace(workspace, delineation_name, discretization_name, model, threshold, internal_pour_points):
+    tweet("Writing discretization parameters to metadata")
+    out_path = workspace
+    out_name = "metaDiscretization"
+    template = r"..\schema\metaDiscretization.csv"
+    config_keyword = ""
+    out_alias = ""
+    meta_discretization_table = os.path.join(out_path, out_name)
+    if not arcpy.Exists(meta_discretization_table):
+        result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
+        meta_discretization_table = result.getOutput(0)
+
+    creation_date = datetime.datetime.now().isoformat()
+    agwa_version_at_creation = ""
+    agwa_gdb_version_at_creation = ""
+    fields = ["DelineationName", "DiscretizationName", "Model", "Threshold", "InternalPourPoints", "CreationDate",
+              "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation"]
+    with arcpy.da.InsertCursor(meta_discretization_table, fields) as cursor:
+        cursor.insertRow((delineation_name, discretization_name, model, threshold, internal_pour_points, creation_date,
+                          agwa_version_at_creation, agwa_gdb_version_at_creation))
+
+
+def discretize(workspace, discretization_name):
     tweet("Reading workspace metadata")
     meta_workspace_table = os.path.join(workspace, "metaWorkspace")
     if not arcpy.Exists(meta_workspace_table):
         # Short-circuit and leave message
         raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_workspace_table))
 
-    fields = ["DelineationWorkspace", "FilledDEMName", "FilledDEMPath", "FDName", "FDPath", "FAName", "FAPath",
-              "FlUpName", "FlUpPath"]
+    fields = ["FDName", "FDPath", "FAName", "FAPath", "FlUpName", "FlUpPath"]
 
     row = None
     expression = "{0} = '{1}'".format(arcpy.AddFieldDelimiters(workspace, "DelineationWorkspace"), workspace)
     with arcpy.da.SearchCursor(meta_workspace_table, fields, expression) as cursor:
         for row in cursor:
-            filled_dem_name = row[1]
-            filled_dem_path = row[2]
+            fd_name = row[0]
+            fd_path = row[1]
 
-            fd_name = row[3]
-            fd_path = row[4]
+            fa_name = row[2]
+            fa_path = row[3]
 
-            fa_name = row[5]
-            fa_path = row[6]
-
-            flup_name = row[7]
-            flup_path = row[8]
+            flup_name = row[4]
+            flup_path = row[5]
         if row is None:
             msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
                 meta_workspace_table, "DelineationWorkspace", workspace)
             print(msg)
             raise Exception(msg)
 
-    return filled_dem_name, filled_dem_path, fd_name, fd_path, fa_name, fa_path, flup_name, flup_path
-
-
-def discretize(workspace, delineation_rasters, delineation, model, threshold, internal_pour_points,
-               discretization_name):
-    # meta_delineation_table = "metaDelineation"
-    # if not arcpy.Exists(meta_delineation_table):
-    #     # Short-circuit and leave message
-    #     print("oops")
-    #     raise Exception("metaDelineation table does not exist, cannot proceed.")
-    #
-    # fields = ["DelineationName", "UnfilledDEMLocationAtCreation", "FilledDEMName", "FilledDEMLocationAtCreation",
-    #           "FDName", "FDLocationAtCreation", "FAName", "FALocationAtCreation"]
-    # row = None
-    # expression = "{0} = '{1}'".format(arcpy.AddFieldDelimiters(outputWorkspace, "DelineationName"), delineation)
-    # with arcpy.da.SearchCursor(meta_delineation_table, fields, expression) as cursor:
-    #     for row in cursor:
-    #         filled_dem_name = row[2]
-    #         filled_dem_location_at_creation = row[3]
-    #
-    #         fd_name = row[4]
-    #         fd_location_at_creation = row[5]
-    #
-    #         fa_name = row[6]
-    #         fa_location_at_creation = row[7]
-    #     if row is None:
-    #         msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
-    #             meta_delineation_table, "DelineationName", delineation)
-    #         print(msg)
-    #         raise Exception(msg)
-
-    filled_dem_name, filled_dem_path, fd_name, fd_path, fa_name, fa_path, flup_name, flup_path = delineation_rasters
-
     flow_direction_raster = os.path.join(fd_path, fd_name)
     flow_accumulation_raster = os.path.join(fa_path, fa_name)
     fl_up_raster = os.path.join(flup_path, flup_name)
 
+    tweet("Reading discretization metadata")
+    meta_discretization_table = os.path.join(workspace, "metaDiscretization")
+    if not arcpy.Exists(meta_discretization_table):
+        # Short-circuit and leave message
+        raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_discretization_table))
+
+    fields = ["DelineationName", "Model", "Threshold", "InternalPourPoints"]
+    row = None
+    expression = "{0} = '{1}'".format(arcpy.AddFieldDelimiters(workspace, "DiscretizationName"), discretization_name)
+    with arcpy.da.SearchCursor(meta_discretization_table, fields, expression) as cursor:
+        for row in cursor:
+            delineation = row[0]
+            model = row[1]
+            threshold = row[2]
+            internal_pour_points = row[3]
+        if row is None:
+            msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
+                meta_discretization_table, "DelineationWorkspace", workspace)
+            print(msg)
+            raise Exception(msg)
+
     # Set Geoprocessing environments
-    arcpy.env.workspace = workspace
     arcpy.env.mask = delineation + "_raster"
     # arcpy.env.snapRaster = Snap Raster
 
     # Process: Raster Calculator
     tweet("Creating streams raster")
-    streams_raster = arcpy.Raster(fl_up_raster) > threshold
-    if saveIntermediateOutputs_par:
+    streams_raster = arcpy.Raster(fl_up_raster) > float(threshold)
+    if save_intermediate_outputs_par:
         streams_raster_output = "intermediate_{}_StreamsRaster".format(discretization_name)
         streams_raster.save(streams_raster_output)
 
     # Process: Stream Link
     tweet("Creating stream links raster")
     stream_link_raster = arcpy.sa.StreamLink(streams_raster, flow_direction_raster)
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         stream_link_output = "intermediate_{}_streamLinkRaster".format(discretization_name)
         stream_link_raster.save(stream_link_output)
 
@@ -124,56 +132,56 @@ def discretize(workspace, delineation_rasters, delineation, model, threshold, in
     # Process: Stream Order
     tweet("Creating stream orders raster")
     stream_order_raster = arcpy.sa.StreamOrder(streams_raster, flow_direction_raster, "SHREVE")
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         stream_order_output = "intermediate_{}_StreamOrder".format(discretization_name)
         stream_order_raster.save(stream_order_output)
 
     # Process: Raster Calculator (2)
     tweet("Creating first order streams raster")
     first_order_streams_raster = stream_order_raster == 1
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         first_order_streams_output = "intermediate_{}_firstOrderStreams".format(discretization_name)
         first_order_streams_raster.save(first_order_streams_output)
 
     # Process: Zonal Fill
     tweet("Creating minimum flow accumulation zones raster of stream links")
     minimum_fa_zones_raster = arcpy.sa.ZonalFill(stream_link_raster, flow_accumulation_raster)
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         minimum_fa_zones_output = "intermediate_{}_faZones".format(discretization_name)
         minimum_fa_zones_raster.save(minimum_fa_zones_output)
 
     # Process: Raster Calculator (3)
     tweet("Creating first order points raster")
     stream_link_points_raster = minimum_fa_zones_raster == flow_accumulation_raster
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         stream_link_points_output = "intermediate_{}_StreamLinkPoints".format(discretization_name)
         stream_link_points_raster.save(stream_link_points_output)
 
     # Process: Raster Calculator (4)
     tweet("Creating zero order points raster")
     zero_order_points_raster = arcpy.sa.Con(first_order_streams_raster, stream_link_points_raster, 0)
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         zero_order_points_output = "intermediate_{}_ZeroOrderPoints".format(discretization_name)
         zero_order_points_raster.save(zero_order_points_output)
 
     # Process: Times
     tweet("Creating stream links * 10 raster")
     stream_link_10_raster = stream_link_raster * 10
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         stream_link_10_output = "intermediate_{}_StreamLink10".format(discretization_name)
         stream_link_10_raster.save(stream_link_10_output)
 
     # Process: Plus
     tweet("Creating unique pour points raster")
     unique_pour_points_raster = zero_order_points_raster + stream_link_10_raster
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         unique_pour_points_output = "intermediate_{}_UniquePourPoints".format(discretization_name)
         unique_pour_points_raster.save(unique_pour_points_output)
 
     # Process: Watershed
     tweet("Creating discretization raster")
     discretization_raster = arcpy.sa.Watershed(flow_direction_raster, unique_pour_points_raster, "VALUE")
-    if saveIntermediateOutputs_par:
+    if save_intermediate_outputs_par:
         discretization_output = "intermediate_{}_raster".format(discretization_name)
         discretization_raster.save(discretization_output)
 
@@ -221,7 +229,7 @@ def discretize(workspace, delineation_rasters, delineation, model, threshold, in
 
     # Delete intermediate feature class data
     # Raster data will be cleaned up automatically since it was not explicitly saved
-    if not saveIntermediateOutputs_par:
+    if not save_intermediate_outputs_par:
         arcpy.Delete_management(intermediate_discretization_1)
         if intermediate_discretization_2:
             arcpy.Delete_management(intermediate_discretization_2)
@@ -237,9 +245,10 @@ def discretize(workspace, delineation_rasters, delineation, model, threshold, in
     arcpy.SetParameter(10, streams_feature_class)
 
 
-workspace_info = initialize_workspace(outputWorkspace_par)
-discretize(outputWorkspace_par, workspace_info, delineation_par, model_par, threshold_par, internalPourPoints_par,
-           discretizationName_par)
+initialize_workspace(workspace_par, delineation_par, discretization_name_par, model_par, threshold_par,
+                     internal_pour_points_par)
+discretize(workspace_par, discretization_name_par)
 
+# This is used to execute code if the file was run but not imported
 if __name__ == "__main__":
     ""
