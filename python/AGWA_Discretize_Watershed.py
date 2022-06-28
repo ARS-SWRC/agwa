@@ -17,7 +17,7 @@ internal_pour_points_par = arcpy.GetParameterAsText(4)
 discretization_name_par = arcpy.GetParameterAsText(5)
 environment_par = arcpy.GetParameterAsText(6)
 workspace_par = arcpy.GetParameterAsText(7)
-save_intermediate_outputs_par = bool(arcpy.GetParameterAsText(8))
+save_intermediate_outputs_par = arcpy.GetParameterAsText(8).lower() == 'true'
 
 arcpy.env.workspace = workspace_par
 
@@ -56,6 +56,7 @@ def initialize_workspace(workspace, delineation_name, discretization_name, model
 
 def discretize(workspace, discretization_name):
     tweet("Reading workspace metadata")
+    tweet(arcpy.env.workspace)
     meta_workspace_table = os.path.join(workspace, "metaWorkspace")
     if not arcpy.Exists(meta_workspace_table):
         # Short-circuit and leave message
@@ -112,14 +113,24 @@ def discretize(workspace, discretization_name):
 
     # Process: Raster Calculator
     tweet("Creating streams raster")
+    tweet("Workspace: %s" % arcpy.env.workspace)
+    tweet("Scratch Workspace: %s" % arcpy.env.scratchWorkspace)
+    tweet("Scratch Geodatabase: %s" % arcpy.env.scratchGDB)
+    tweet("Scratch Folder: %s" % arcpy.env.scratchFolder)
     streams_raster = arcpy.Raster(fl_up_raster) > float(threshold)
+    tweet("streams raster: %s" % streams_raster)
     if save_intermediate_outputs_par:
         streams_raster_output = "intermediate_{}_StreamsRaster".format(discretization_name)
         streams_raster.save(streams_raster_output)
 
     # Process: Stream Link
     tweet("Creating stream links raster")
+    tweet("Workspace: %s" % arcpy.env.workspace)
+    tweet("Scratch Workspace: %s" % arcpy.env.scratchWorkspace)
+    tweet("Scratch Geodatabase: %s" % arcpy.env.scratchGDB)
+    tweet("Scratch Folder: %s" % arcpy.env.scratchFolder)
     stream_link_raster = arcpy.sa.StreamLink(streams_raster, flow_direction_raster)
+    tweet("stream link raster: %s" % stream_link_raster)
     if save_intermediate_outputs_par:
         stream_link_output = "intermediate_{}_streamLinkRaster".format(discretization_name)
         stream_link_raster.save(stream_link_output)
@@ -128,6 +139,22 @@ def discretize(workspace, discretization_name):
     tweet("Converting streams raster to feature class")
     streams_feature_class = "{}_streams".format(discretization_name)
     arcpy.gp.StreamToFeature(stream_link_raster, flow_direction_raster, streams_feature_class, "NO_SIMPLIFY")
+
+    # Process Feature Vertices To Points
+    tweet("Creating nodes feature class")
+    nodes_feature_class = "{}_nodes".format(discretization_name)
+    # Creates all nodes but the outlet
+    arcpy.management.FeatureVerticesToPoints(streams_feature_class, nodes_feature_class, 'START')
+    # Get to_node that is missing, which is the outlet
+    from_set = {r[0] for r in arcpy.da.SearchCursor(streams_feature_class, "from_node")}
+    # set containing to_node without duplicates
+    to_set = {r[0] for r in arcpy.da.SearchCursor(streams_feature_class, "to_node")}
+    missing_to_node = list(to_set.difference(from_set))[0]
+
+    # fields = ["SHAPE@", "GRIDCODE", "Element_ID"]
+    # with arcpy.da.SearchCursor(streams_feature_class, fields) as nodes_cursor:
+    #     for node_row in nodes_cursor:
+    #         coord = node_row[0].lastPoint
 
     # Process: Stream Order
     tweet("Creating stream orders raster")
@@ -145,6 +172,8 @@ def discretize(workspace, discretization_name):
 
     # Process: Zonal Fill
     tweet("Creating minimum flow accumulation zones raster of stream links")
+    tweet(stream_link_raster)
+    tweet(flow_accumulation_raster)
     minimum_fa_zones_raster = arcpy.sa.ZonalFill(stream_link_raster, flow_accumulation_raster)
     if save_intermediate_outputs_par:
         minimum_fa_zones_output = "intermediate_{}_faZones".format(discretization_name)
@@ -190,52 +219,60 @@ def discretize(workspace, discretization_name):
     intermediate_discretization_1 = "intermediate_{}_1".format(discretization_name)
     arcpy.RasterToPolygon_conversion(discretization_raster, intermediate_discretization_1, "NO_SIMPLIFY", "VALUE")
 
-    # Process: Dissolve
-    tweet("Dissolving intermediate discretization feature class")
-    intermediate_discretization_2 = "intermediate_{}_2_dissolve".format(discretization_name)
-    arcpy.Dissolve_management(intermediate_discretization_1, intermediate_discretization_2, "gridcode", "",
-                              "MULTI_PART", "DISSOLVE_LINES")
-
     discretization_feature_class = "{}_elements".format(discretization_name)
     intermediate_discretization_3 = None
     intermediate_discretization_4 = None
     intermediate_discretization_5 = None
     if model == "KINEROS2":
         tweet("Splitting model elements by streams")
-        intermediate_discretization_3 = "intermediate_{}_3_split".format(discretization_name)
+        intermediate_discretization_2 = "intermediate_{}_2_split".format(discretization_name)
         # ArcMap needs an advanced license to use FeatureToPolygon
         # https://desktop.arcgis.com/en/arcmap/latest/tools/data-management-toolbox/feature-to-polygon.htm
-        arcpy.management.FeatureToPolygon([intermediate_discretization_2, streams_feature_class],
-                                          intermediate_discretization_3)
+        arcpy.management.FeatureToPolygon([intermediate_discretization_1, streams_feature_class],
+                                          intermediate_discretization_2)
 
         # Delete extra FID field created from FeatureToPolygon
         # Delete the gridcode field because it is empty and will be re-added with the Identity tool
-        fields = "FID_{};gridcode".format(intermediate_discretization_2)
+        fields = "FID_{};gridcode".format(intermediate_discretization_1)
         tweet("Deleting unnecessary discretization fields")
-        tweet(fields)
-        arcpy.management.DeleteField(intermediate_discretization_3, fields, "DELETE_FIELDS")
+        arcpy.management.DeleteField(intermediate_discretization_2, fields, "DELETE_FIELDS")
 
-        intermediate_discretization_4 = "intermediate_{}_4_identity".format(discretization_name)
+        intermediate_discretization_3 = "intermediate_{}_3_identity".format(discretization_name)
         tweet("Updating gridcode")
-        arcpy.analysis.Identity(intermediate_discretization_3, intermediate_discretization_2,
-                                intermediate_discretization_4, "NO_FID")
+        arcpy.analysis.Identity(intermediate_discretization_2, intermediate_discretization_1,
+                                intermediate_discretization_3, "NO_FID")
 
         # Clip output from FeatureToPolygon because it can create excess polygons where holes in existing features
         # exists with two vertices that are coincident. The newly created feature is not part of the original
         # delineation or discretization and should be removed.
-        intermediate_discretization_5 = "intermediate_{}_5_clip".format(discretization_name)
-        arcpy.analysis.PairwiseClip(intermediate_discretization_4, delineation, intermediate_discretization_5)
+        intermediate_discretization_4 = "intermediate_{}_4_clip".format(discretization_name)
+        arcpy.analysis.PairwiseClip(intermediate_discretization_3, delineation, intermediate_discretization_4)
+
+        assign_ids(intermediate_discretization_4, streams_feature_class, model)
+
+        # Process: Dissolve
+        tweet("Dissolving intermediate discretization feature class")
+        intermediate_discretization_5 = "intermediate_{}_5_dissolve".format(discretization_name)
+        arcpy.Dissolve_management(intermediate_discretization_4, intermediate_discretization_5, "Element_ID", "",
+                                  "MULTI_PART", "DISSOLVE_LINES")
 
         arcpy.management.Copy(intermediate_discretization_5, discretization_feature_class)
     else:
+        # Process: Dissolve
+        tweet("Dissolving intermediate discretization feature class")
+        intermediate_discretization_2 = "intermediate_{}_2_dissolve".format(discretization_name)
+        arcpy.Dissolve_management(intermediate_discretization_1, intermediate_discretization_2, "gridcode", "",
+                                  "MULTI_PART", "DISSOLVE_LINES")
+
+        assign_ids(intermediate_discretization_2, streams_feature_class, model)
+
         arcpy.management.Copy(intermediate_discretization_2, discretization_feature_class)
 
     # Delete intermediate feature class data
     # Raster data will be cleaned up automatically since it was not explicitly saved
     if not save_intermediate_outputs_par:
         arcpy.Delete_management(intermediate_discretization_1)
-        if intermediate_discretization_2:
-            arcpy.Delete_management(intermediate_discretization_2)
+        arcpy.Delete_management(intermediate_discretization_2)
         if intermediate_discretization_3:
             arcpy.Delete_management(intermediate_discretization_3)
         if intermediate_discretization_4:
@@ -243,36 +280,22 @@ def discretize(workspace, discretization_name):
         if intermediate_discretization_5:
             arcpy.Delete_management(intermediate_discretization_5)
 
-        # Assign the elementID to each element in the elements feature class
-        # Elements ending in 1 are uplands
-        # Elements ending in 2 are laterals on the right
-        # Elements ending in 3 are laterals on the left
-        tweet("Assigning elementID to elements")
-        # discretization_feature_class = "{}_elements".format(discretization)
-        # fields = ["GRIDCODE", "ElementID"]
-        # row = None
-        # with arcpy.da.UpdateCursor(discretization_feature_class, fields) as cursor:
-        #     for row in cursor:
-        #         if row[0] == 1:
-        #             row[1] = row[0]
-        #         else:
-        #             onRight = True
-        #             onLeft = False
-        #             if onRight:
-        #                 row[1] = row[0] + 2
-        #             elif onLeft:
-        #                 row[1] = row[0] + 3
-        #     if row is None:
-        #         msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
-        #             meta_workspace_table, "DelineationWorkspace", workspace)
-        #         tweet(msg)
-        #         raise Exception(msg)
+    # Set the output parameter so the discretization can be added to the map
+    arcpy.SetParameter(9, discretization_feature_class)
+    arcpy.SetParameter(10, streams_feature_class)
 
-    # Assign the streamID to each stream in the streams feature class
-    tweet("Assigning StreamID to streams")
-    stream_id_field = "StreamID"
-    arcpy.management.AddField(streams_feature_class, stream_id_field, "LONG", None, None, None, '', "NULLABLE",
+
+def assign_ids(discretization_feature_class, streams_feature_class, model):
+    # Assign the element_ID to each element in the elements feature class
+    # Elements ending in 0 are non-upland SWAT subwatersheds
+    # Elements ending in 1 are uplands
+    # Elements ending in 2 are laterals on the right
+    # Elements ending in 3 are laterals on the left
+    tweet("Assigning Element_ID to elements")
+    element_id_field = "Element_ID"
+    arcpy.management.AddField(discretization_feature_class, element_id_field, "LONG", None, None, None, '', "NULLABLE",
                               "NON_REQUIRED", '')
+
     # Distinguishing the expression_type between ArcMap and ArcGIS Pro is not strictly necessary.
     # ArcGIS Pro supports the PYTHON_9.3 keyword for backward compatibility, though it is not listed as a choice
     # See: https://pro.arcgis.com/en/pro-app/latest/tool-reference/data-management/calculate-field-examples.htm
@@ -281,11 +304,39 @@ def discretize(workspace, discretization_name):
         expression_type = "PYTHON_9.3"
     else:
         expression_type = "PYTHON3"
-    arcpy.management.CalculateField(streams_feature_class, stream_id_field, "(!grid_code! * 10) + 4", expression_type)
+    if model == "SWAT":
+        arcpy.management.CalculateField(discretization_feature_class, element_id_field, "!grid_code!", expression_type)
+    else:
+        fields = ["SHAPE@", "GRIDCODE", "Element_ID"]
+        with arcpy.da.UpdateCursor(discretization_feature_class, fields) as element_cursor:
+            for element_row in element_cursor:
+                if element_row[1] % 2 == 1:
+                    element_row[2] = element_row[1]
+                else:
+                    element_poly = element_row[0]
+                    label_point = element_poly.labelPoint
+                    element_gridcode = element_row[1]
+                    stream_gridcode = element_gridcode / 10
+                    expression = "{0} = {1}".format(arcpy.AddFieldDelimiters(arcpy.env.workspace, "grid_code"),
+                                                    stream_gridcode)
+                    with arcpy.da.SearchCursor(streams_feature_class, "SHAPE@", expression) as stream_cursor:
+                        for stream_row in stream_cursor:
+                            stream_line = stream_row[0]
+                            result = stream_line.queryPointAndDistance(label_point)
+                            (point, dist_along_line, dist_to_point, on_right) = result
+                            if on_right:
+                                element_row[2] = element_gridcode + 2
+                            else:
+                                element_row[2] = element_gridcode + 3
 
-    # Set the output parameter so the discretization can be added to the map
-    arcpy.SetParameter(9, discretization_feature_class)
-    arcpy.SetParameter(10, streams_feature_class)
+                element_cursor.updateRow(element_row)
+
+    # Assign the stream_ID to each stream in the streams feature class
+    tweet("Assigning Stream_ID to streams")
+    stream_id_field = "Stream_ID"
+    arcpy.management.AddField(streams_feature_class, stream_id_field, "LONG", None, None, None, '', "NULLABLE",
+                              "NON_REQUIRED", '')
+    arcpy.management.CalculateField(streams_feature_class, stream_id_field, "(!grid_code! * 10) + 4", expression_type)
 
 
 initialize_workspace(workspace_par, delineation_par, discretization_name_par, model_par, threshold_par,
