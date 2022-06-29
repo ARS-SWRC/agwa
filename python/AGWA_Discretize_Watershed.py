@@ -96,7 +96,7 @@ def discretize(workspace, discretization_name):
     expression = "{0} = '{1}'".format(arcpy.AddFieldDelimiters(workspace, "DiscretizationName"), discretization_name)
     with arcpy.da.SearchCursor(meta_discretization_table, fields, expression) as cursor:
         for row in cursor:
-            delineation = row[0]
+            delineation_name = row[0]
             model = row[1]
             threshold = row[2]
             internal_pour_points = row[3]
@@ -107,7 +107,7 @@ def discretize(workspace, discretization_name):
             raise Exception(msg)
 
     # Set Geoprocessing environments
-    arcpy.env.mask = delineation + "_raster"
+    arcpy.env.mask = delineation_name + "_raster"
     # arcpy.env.snapRaster = Snap Raster
 
     # Process: Raster Calculator
@@ -140,6 +140,7 @@ def discretize(workspace, discretization_name):
     nodes_feature_class = "{}_nodes".format(discretization_name)
     # Creates all nodes but the outlet
     arcpy.management.FeatureVerticesToPoints(streams_feature_class, nodes_feature_class, 'START')
+    arcpy.management.AddField(nodes_feature_class, "node_type", "TEXT")
     # Get to_node that is missing, which is the outlet
     from_set = {r[0] for r in arcpy.da.SearchCursor(streams_feature_class, "from_node")}
     # set containing to_node without duplicates
@@ -149,12 +150,15 @@ def discretize(workspace, discretization_name):
     # tweet("to_set: %s" % to_set)
     # tweet("outlet: %s" % missing_to_node)
 
+    tweet("Identifying outlet node")
     fields = ["SHAPE@", "arcid", "grid_code", "from_node", "to_node"]
     expression = "{0} = {1}".format(arcpy.AddFieldDelimiters(workspace, "to_node"), missing_to_node)
     with arcpy.da.SearchCursor(streams_feature_class, fields, expression) as streams_cursor:
+        fields.append("node_type")
         for stream_row in streams_cursor:
             with arcpy.da.InsertCursor(nodes_feature_class, fields) as cursor:
-                cursor.insertRow((stream_row[0].lastPoint, stream_row[1], stream_row[2], stream_row[3], stream_row[4]))
+                cursor.insertRow((stream_row[0].lastPoint, stream_row[1], stream_row[2], stream_row[3], stream_row[4],
+                                  "outlet"))
 
     # Process: Stream Order
     tweet("Creating stream orders raster")
@@ -244,7 +248,7 @@ def discretize(workspace, discretization_name):
         # exists with two vertices that are coincident. The newly created feature is not part of the original
         # delineation or discretization and should be removed.
         intermediate_discretization_4 = "intermediate_{}_4_clip".format(discretization_name)
-        arcpy.analysis.PairwiseClip(intermediate_discretization_3, delineation, intermediate_discretization_4)
+        arcpy.analysis.PairwiseClip(intermediate_discretization_3, delineation_name, intermediate_discretization_4)
 
         assign_ids(intermediate_discretization_4, streams_feature_class, model)
 
@@ -265,6 +269,9 @@ def discretize(workspace, discretization_name):
         assign_ids(intermediate_discretization_2, streams_feature_class, model)
 
         arcpy.management.Copy(intermediate_discretization_2, discretization_feature_class)
+
+    tweet("Identifying contributing channels")
+    identify_contributing_channels(workspace, delineation_name, discretization_name, streams_feature_class)
 
     # Delete intermediate feature class data
     # Raster data will be cleaned up automatically since it was not explicitly saved
@@ -335,6 +342,37 @@ def assign_ids(discretization_feature_class, streams_feature_class, model):
     arcpy.management.AddField(streams_feature_class, stream_id_field, "LONG", None, None, None, '', "NULLABLE",
                               "NON_REQUIRED", '')
     arcpy.management.CalculateField(streams_feature_class, stream_id_field, "(!grid_code! * 10) + 4", expression_type)
+
+
+def identify_contributing_channels(workspace, delineation_name, discretization_name, streams_feature_class):
+    # Identify the contributing channels for each channel
+    out_path = workspace
+    out_name = "contributing_channels"
+    template = r"..\schema\contributing_channels.csv"
+    config_keyword = ""
+    out_alias = ""
+    contributing_channels_table = os.path.join(out_path, out_name)
+    if not arcpy.Exists(contributing_channels_table):
+        result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
+        contributing_channels_table = result.getOutput(0)
+
+    creation_date = datetime.datetime.now().isoformat()
+    streams_fields = ["from_node", "Stream_ID"]
+    contrib_fields = ["DelineationName", "DiscretizationName", "StreamID", "ContributingStream", "CreationDate"]
+    # expression = "{0} = '{1}' AND {2} = '{3}'".format(arcpy.AddFieldDelimiters(workspace, "to_node"), missing_to_node)
+    with arcpy.da.SearchCursor(streams_feature_class, streams_fields) as streams_cursor:
+        for stream_row in streams_cursor:
+            from_node = stream_row[0]
+            stream_id = stream_row[1]
+
+            to_node_field = arcpy.AddFieldDelimiters(workspace, "to_node")
+            inner_expression = "{0} = {1}".format(to_node_field, from_node)
+            with arcpy.da.SearchCursor(streams_feature_class, streams_fields, inner_expression) as inner_streams_cursor:
+                for inner_stream_row in inner_streams_cursor:
+                    inner_stream_id = inner_stream_row[1]
+                    with arcpy.da.InsertCursor(contributing_channels_table, contrib_fields) as contrib_cursor:
+                        contrib_cursor.insertRow((delineation_name, discretization_name, stream_id, inner_stream_id,
+                                                 creation_date))
 
 
 initialize_workspace(workspace_par, delineation_par, discretization_name_par, model_par, threshold_par,
