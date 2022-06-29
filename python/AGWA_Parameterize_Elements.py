@@ -131,8 +131,8 @@ def parameterize(workspace, discretization, parameterization_name):
 
     # Create the parameterization look-up tables if they don't exist
     out_path = workspace
-    out_name = "parameters_elements_{}".format(discretization)
-    template = r"..\schema\parameters_elements.csv"
+    out_name = "parameters_elements_physical"
+    template = r"..\schema\parameters_elements_physical.csv"
     config_keyword = ""
     out_alias = ""
     parameters_elements_table = os.path.join(out_path, out_name)
@@ -140,18 +140,14 @@ def parameterize(workspace, discretization, parameterization_name):
         result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
         parameters_elements_table = result.getOutput(0)
 
-    out_name = "parameters_streams_{}".format(discretization)
-    template = r"..\schema\parameters_streams.csv"
+    out_name = "parameters_streams_physical"
+    template = r"..\schema\parameters_streams_physical.csv"
     config_keyword = ""
     out_alias = ""
     parameters_streams_table = os.path.join(out_path, out_name)
     if not arcpy.Exists(parameters_streams_table):
         result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
         parameters_streams_table = result.getOutput(0)
-
-    # Assign the maximum flow accumulation of each stream element
-
-
 
     return
 
