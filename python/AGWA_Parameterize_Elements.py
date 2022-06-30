@@ -162,6 +162,10 @@ def parameterize(workspace, discretization, parameterization_name):
     calculate_mean_elevation(workspace, delineation_name, discretization, parameterization_name, unfilled_dem_raster,
                              save_intermediate_outputs_par)
 
+    tweet("Calculating mean slope")
+    calculate_mean_slope(workspace, delineation_name, discretization, parameterization_name, slope_raster,
+                         save_intermediate_outputs_par)
+
     return
 
 
@@ -211,6 +215,35 @@ def calculate_mean_elevation(workspace, delineation_name, discretization_name, p
     mean_elevation_field = "{}.MeanElevation".format(table_view)
     zonal_mean_field = "!{}.MEAN!".format(zonal_table)
     arcpy.management.CalculateField(table_view, mean_elevation_field, zonal_mean_field)
+    arcpy.management.RemoveJoin(table_view, zonal_table)
+
+    if not save_intermediate_outputs:
+        arcpy.Delete_management(zonal_table)
+
+
+def calculate_mean_slope(workspace, delineation_name, discretization_name, parameterization_name, slope_raster,
+                         save_intermediate_outputs):
+    parameters_elements_table = os.path.join(workspace, "parameters_elements_physical")
+    discretization_feature_class = os.path.join(workspace, "{}_elements".format(discretization_name))
+    zone_field = "Element_ID"
+    value_raster = slope_raster
+    zonal_table = "intermediate_{}_meanSlope".format(discretization_name)
+    arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "NODATA",
+                                    "MEAN")
+
+    table_view = "parameters_elements_physical"
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                      discretization_name_field, discretization_name,
+                                                                      parameterization_name_field,
+                                                                      parameterization_name)
+    arcpy.management.MakeTableView(parameters_elements_table, table_view, expression)
+    arcpy.management.AddJoin(table_view, "ElementID", zonal_table, "Element_ID")
+    mean_slope_field = "{}.MeanSlope".format(table_view)
+    zonal_mean_field = "!{}.MEAN!".format(zonal_table)
+    arcpy.management.CalculateField(table_view, mean_slope_field, zonal_mean_field)
     arcpy.management.RemoveJoin(table_view, zonal_table)
 
     if not save_intermediate_outputs:
