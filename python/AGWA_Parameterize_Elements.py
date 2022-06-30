@@ -14,6 +14,7 @@ channel_par = arcpy.GetParameterAsText(4)
 parameterization_name_par = arcpy.GetParameterAsText(5)
 environment_par = arcpy.GetParameterAsText(6)
 workspace_par = arcpy.GetParameterAsText(7)
+save_intermediate_outputs_par = True
 
 arcpy.env.workspace = workspace_par
 
@@ -73,28 +74,37 @@ def parameterize(workspace, discretization, parameterization_name):
         # Short-circuit and leave message
         raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_workspace_table))
 
-    fields = ["FDName", "FDPath", "FAName", "FAPath", "FlUpName", "FlUpPath", "SlopeName", "SlopePath"]
+    fields = ["UnfilledDEMName", "UnfilledDEMPath", "FilledDEMName", "FilledDEMPath", "FDName", "FDPath", "FAName",
+              "FAPath", "FlUpName", "FlUpPath", "SlopeName", "SlopePath"]
     row = None
     expression = "{0} = '{1}'".format(arcpy.AddFieldDelimiters(workspace, "DelineationWorkspace"), workspace)
     with arcpy.da.SearchCursor(meta_workspace_table, fields, expression) as cursor:
         for row in cursor:
-            fd_name = row[0]
-            fd_path = row[1]
+            unfilled_dem_name = row[0]
+            unfilled_dem_path = row[1]
 
-            fa_name = row[2]
-            fa_path = row[3]
+            filled_dem_name = row[2]
+            filled_dem_path = row[3]
 
-            flup_name = row[4]
-            flup_path = row[5]
+            fd_name = row[4]
+            fd_path = row[5]
 
-            slope_name = row[6]
-            slope_path = row[7]
+            fa_name = row[6]
+            fa_path = row[7]
+
+            flup_name = row[8]
+            flup_path = row[9]
+
+            slope_name = row[10]
+            slope_path = row[11]
         if row is None:
             msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
                 meta_workspace_table, "DelineationWorkspace", workspace)
             print(msg)
             raise Exception(msg)
 
+    unfilled_dem_raster = os.path.join(unfilled_dem_path, unfilled_dem_name)
+    filled_dem_raster = os.path.join(filled_dem_path, filled_dem_name)
     flow_direction_raster = os.path.join(fd_path, fd_name)
     flow_accumulation_raster = os.path.join(fa_path, fa_name)
     fl_up_raster = os.path.join(flup_path, flup_name)
@@ -106,28 +116,24 @@ def parameterize(workspace, discretization, parameterization_name):
         # Short-circuit and leave message
         raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_parameterization_table))
 
-    fields = ["SlopeType", "FlowLengthType", "HydraulicGeometryRelationship", "ChannelType"]
+    fields = ["DelineationName", "SlopeType", "FlowLengthType", "HydraulicGeometryRelationship", "ChannelType"]
     row = None
-    expression = "{0} = '{1}' AND {2} = '{3}'".format(arcpy.AddFieldDelimiters(workspace, "DiscretizationName"),
-                                                      discretization, arcpy.AddFieldDelimiters(workspace,
-                                                                                               "ParameterizationName"),
-                                                      parameterization_name)
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' AND {2} = '{3}'".format(discretization_name_field, discretization,
+                                                      parameterization_name_field, parameterization_name)
     with arcpy.da.SearchCursor(meta_parameterization_table, fields, expression) as cursor:
         for row in cursor:
-            slope_type = row[0]
-            flow_length_type = row[1]
-            hydraulic_geometry_relationship = row[2]
-            channel_type = row[3]
+            delineation_name = row[0]
+            slope_type = row[1]
+            flow_length_type = row[2]
+            hydraulic_geometry_relationship = row[3]
+            channel_type = row[4]
         if row is None:
             msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
                 meta_parameterization_table, "DelineationWorkspace", workspace)
             print(msg)
             raise Exception(msg)
-
-    tweet(slope_type)
-    tweet(flow_length_type)
-    tweet(hydraulic_geometry_relationship)
-    tweet(channel_type)
 
     # Create the parameterization look-up tables if they don't exist
     out_path = workspace
@@ -149,7 +155,66 @@ def parameterize(workspace, discretization, parameterization_name):
         result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
         parameters_streams_table = result.getOutput(0)
 
+    tweet("Populating parameter tables")
+    populate_parameter_tables(workspace, delineation_name, discretization, parameterization_name)
+
+    tweet("Calculating mean elevation")
+    calculate_mean_elevation(workspace, delineation_name, discretization, parameterization_name, unfilled_dem_raster,
+                             save_intermediate_outputs_par)
+
     return
+
+
+def populate_parameter_tables(workspace, delineation_name, discretization_name, parameterization_name):
+    parameters_elements_table = os.path.join(workspace, "parameters_elements_physical")
+    parameters_streams_table = os.path.join(workspace, "parameters_streams_physical")
+
+    elements_fields = ["Element_ID"]
+    parameters_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "ElementID"]
+    discretization_feature_class = os.path.join(workspace, "{}_elements".format(discretization_name))
+    with arcpy.da.SearchCursor(discretization_feature_class, elements_fields) as elements_cursor:
+        for element_row in elements_cursor:
+            element_id = element_row[0]
+            with arcpy.da.InsertCursor(parameters_elements_table, parameters_fields) as parameters_cursor:
+                parameters_cursor.insertRow((delineation_name, discretization_name, parameterization_name, element_id))
+
+    streams_fields = ["Stream_ID"]
+    parameters_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "StreamID"]
+    streams_feature_class = os.path.join(workspace, "{}_streams".format(discretization_name))
+    with arcpy.da.SearchCursor(streams_feature_class, streams_fields) as streams_cursor:
+        for stream_row in streams_cursor:
+            stream_id = stream_row[0]
+            with arcpy.da.InsertCursor(parameters_streams_table, parameters_fields) as parameters_cursor:
+                parameters_cursor.insertRow((delineation_name, discretization_name, parameterization_name, stream_id))
+
+
+def calculate_mean_elevation(workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
+                             save_intermediate_outputs):
+    parameters_elements_table = os.path.join(workspace, "parameters_elements_physical")
+    discretization_feature_class = os.path.join(workspace, "{}_elements".format(discretization_name))
+    zone_field = "Element_ID"
+    value_raster = dem_raster
+    zonal_table = "intermediate_{}_meanElevation".format(discretization_name)
+    arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "NODATA",
+                                    "MEAN")
+
+    table_view = "parameters_elements_physical"
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                      discretization_name_field, discretization_name,
+                                                                      parameterization_name_field,
+                                                                      parameterization_name)
+    arcpy.management.MakeTableView(parameters_elements_table, table_view, expression)
+    arcpy.management.AddJoin(table_view, "ElementID", zonal_table, "Element_ID")
+    mean_elevation_field = "{}.MeanElevation".format(table_view)
+    zonal_mean_field = "!{}.MEAN!".format(zonal_table)
+    arcpy.management.CalculateField(table_view, mean_elevation_field, zonal_mean_field)
+    arcpy.management.RemoveJoin(table_view, zonal_table)
+
+    if not save_intermediate_outputs:
+        arcpy.Delete_management(zonal_table)
 
 
 initialize_workspace(workspace_par, discretization_par, parameterization_name_par, slope_par, flow_length_par, hgr_par,
