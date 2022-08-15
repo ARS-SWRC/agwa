@@ -1,4 +1,10 @@
-Creative Commons Legal Code
+## Public Domain
+
+This project, a work of the United States Government, is subject to **17 U.S.C. 105 - Subject matter of copyright: United States Government works** and is in the public domain within the United States.
+
+Copyright and related rights of this project are waived worldwide through the CC0 1.0 Universal license.
+
+## Creative Commons Legal Code
 
 CC0 1.0 Universal
 
