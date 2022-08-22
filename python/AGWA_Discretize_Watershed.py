@@ -119,9 +119,17 @@ def discretize(workspace, discretization_name):
     #  in at the %temp% Windows directory.
     streams_raster = arcpy.Raster(fl_up_raster) > float(threshold)
     # tweet("streams raster: %s" % streams_raster)
+    streams_raster_output = "{}_streams_raster".format(discretization_name)
+    streams_raster.save(streams_raster_output)
+
+    tweet("Creating flow length (downstream) raster")
+    flow_direction_nostream_raster = arcpy.sa.Con(streams_raster_output, flow_direction_raster, None, "Value = 0")
     if save_intermediate_outputs_par:
-        streams_raster_output = "intermediate_{}_StreamsRaster".format(discretization_name)
-        streams_raster.save(streams_raster_output)
+        flow_direction_nostream_raster_output = "intermediate_{}_flowDirectionNoStream".format(discretization_name)
+        flow_direction_nostream_raster.save(flow_direction_nostream_raster_output)
+    flow_length_down_raster_output = "{}_flow_length_downstream".format(discretization_name)
+    flow_length_down_raster = FlowLength(flow_direction_nostream_raster, direction_measurement="DOWNSTREAM")
+    flow_length_down_raster.save(flow_length_down_raster_output)
 
     # Process: Stream Link
     tweet("Creating stream links raster")
