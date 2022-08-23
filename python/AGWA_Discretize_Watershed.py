@@ -4,6 +4,7 @@ from __future__ import print_function, unicode_literals, absolute_import
 import arcpy
 import os
 import datetime
+# import numpy as np
 
 # Check out any necessary licenses
 arcpy.CheckOutExtension("spatial")
@@ -327,7 +328,6 @@ def assign_ids(discretization_feature_class, streams_feature_class, model):
                     element_row[2] = element_row[1]
                 else:
                     element_poly = element_row[0]
-                    label_point = element_poly.labelPoint
                     element_gridcode = element_row[1]
                     stream_gridcode = element_gridcode / 10
                     expression = "{0} = {1}".format(arcpy.AddFieldDelimiters(arcpy.env.workspace, "grid_code"),
@@ -335,12 +335,68 @@ def assign_ids(discretization_feature_class, streams_feature_class, model):
                     with arcpy.da.SearchCursor(streams_feature_class, "SHAPE@", expression) as stream_cursor:
                         for stream_row in stream_cursor:
                             stream_line = stream_row[0]
-                            result = stream_line.queryPointAndDistance(label_point)
+                            stream_part = stream_line.getPart(0)
+                            if stream_part.count > 3:
+                                start_point = stream_part[1]
+                                end_point = stream_part[2]
+                            else:
+                                start_point = stream_line.positionAlongLine(0.49, True).getPart(0)
+                                end_point = stream_line.positionAlongLine(0.51, True).getPart(0)
+
+                            start_tpl = (start_point.X, start_point.Y)
+                            end_tpl = (end_point.X, end_point.Y)
+                            midpoint = ((start_tpl[0] + end_tpl[0]) / 2, (start_tpl[1] + end_tpl[1]) / 2)
+
+                            if start_tpl[0] == end_tpl[0]:
+                                # vertical line
+                                int_tpl = tuple(item1 + item2 for item1, item2 in zip(midpoint, (1, 0)))
+                            elif start_tpl[1] == end_tpl[1]:
+                                # horizontal line
+                                int_tpl = tuple(item1 + item2 for item1, item2 in zip(midpoint, (0, 1)))
+                            else:
+                                # normal slope
+                                slope = (end_tpl[1] - start_tpl[1]) / (end_tpl[0] - start_tpl[0])
+                                slope_perp_bisector = -1 / slope
+                                intercept_bisector = slope_perp_bisector * (-1) * midpoint[0] + midpoint[1]
+                                int_x = midpoint[0] + 1
+                                int_y = slope_perp_bisector * int_x + intercept_bisector
+                                int_tpl = (int_x, int_y)
+
+                            # the intersection point is calculated from the stream of derived from the polygon
+                            # so using the cross product will always return the same result on the same side of the
+                            # line
+                            # a = np.array([start_tpl[0] - int_tpl[0], start_tpl[1] - int_tpl[1], 0])
+                            # b = np.array([end_tpl[0] - int_tpl[0], end_tpl[1] - int_tpl[1], 0])
+                            # c = np.cross(a, b)
+                            # if c[2] > 0:
+                            #     print("Side is left")
+                            #     element_row[2] = element_gridcode + 3
+                            # else:
+                            #     print("Side is right")
+                            #     element_row[2] = element_gridcode + 2
+                            # print(c)
+
+                            # The intersection point is calculated to always be on the right side of the stream
+                            # so if the element polygon contains it, the polygon is on the right side of the stream too
+                            pg = arcpy.PointGeometry(arcpy.Point(int_tpl[0], int_tpl[1]), element_poly.spatialReference)
+                            result = stream_line.queryPointAndDistance(pg)
                             (point, dist_along_line, dist_to_point, on_right) = result
                             if on_right:
-                                element_row[2] = element_gridcode + 2
+                                # intersection point is on right side of line
+                                # if element_poly contains the point, it is also on the right side of the line
+                                # else it's on the left side of the line
+                                if element_poly.contains(pg):
+                                    element_row[2] = element_gridcode + 2
+                                else:
+                                    element_row[2] = element_gridcode + 3
                             else:
-                                element_row[2] = element_gridcode + 3
+                                # intersection point is on left side of line
+                                # if element_poly contains the point, it is also on the left side of the line
+                                # else it's on the right side of the line
+                                if element_poly.contains(pg):
+                                    element_row[2] = element_gridcode + 3
+                                else:
+                                    element_row[2] = element_gridcode + 2
 
                 element_cursor.updateRow(element_row)
 
