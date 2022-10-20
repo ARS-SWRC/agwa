@@ -1,4 +1,4 @@
-# Import arcpy module
+﻿# Import arcpy module
 from __future__ import print_function, unicode_literals, absolute_import
 
 import arcpy
@@ -129,7 +129,7 @@ def discretize(workspace, discretization_name):
         flow_direction_nostream_raster_output = "intermediate_{}_flowDirectionNoStream".format(discretization_name)
         flow_direction_nostream_raster.save(flow_direction_nostream_raster_output)
     flow_length_down_raster_output = "{}_flow_length_downstream".format(discretization_name)
-    flow_length_down_raster = FlowLength(flow_direction_nostream_raster, direction_measurement="DOWNSTREAM")
+    flow_length_down_raster = arcpy.sa.FlowLength(flow_direction_nostream_raster, direction_measurement="DOWNSTREAM")
     flow_length_down_raster.save(flow_length_down_raster_output)
 
     # Process: Stream Link

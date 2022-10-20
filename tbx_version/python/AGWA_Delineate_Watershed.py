@@ -174,7 +174,7 @@ def delineate(workspace, delineation_name):
 
         save_delineation_raster = True
         if save_delineation_raster:
-            delineation_output_name = os.path.join(workspace, delineation_name_par + "_raster")
+            delineation_output_name = os.path.join(workspace, delineation_name + "_raster")
             delineation_raster.save(delineation_output_name)
 
         # Set the output parameter so the delineation can be added to the map
