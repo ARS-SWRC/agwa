@@ -172,6 +172,12 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     calculate_mean_flow_length(workspace, delineation_name, discretization, parameterization_name,
                                save_intermediate_outputs)
 
+    tweet("Calculating element centroids")
+    calculate_centroids(workspace, delineation_name, discretization, parameterization_name, save_intermediate_outputs)
+
+    tweet("Calculating element geometries")
+    calculate_geometries(workspace, delineation_name, discretization, parameterization_name, save_intermediate_outputs)
+
     return
 
 
@@ -322,3 +328,46 @@ def calculate_mean_flow_length(workspace, delineation_name, discretization_name,
 
     if not save_intermediate_outputs:
         arcpy.Delete_management(zonal_table)
+
+
+def calculate_centroids(workspace, delineation_name, discretization_name, parameterization_name,
+                        save_intermediate_outputs):
+    table_name = "parameters_elements_physical"
+    parameters_elements_table = os.path.join(workspace, table_name)
+    discretization_elements = "{}_elements".format(discretization_name)
+    discretization_feature_class = os.path.join(workspace, discretization_elements)
+
+    arcpy.management.AddFields(discretization_feature_class, "CentroidX FLOAT # # # #;CentroidY FLOAT # # # #", None)
+    arcpy.management.CalculateGeometryAttributes(discretization_feature_class,
+                                                 "CentroidX CENTROID_X;CentroidY CENTROID_Y", '', '', None,
+                                                 "SAME_AS_INPUT")
+
+    table_view = "{}_tableview".format(table_name)
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                      discretization_name_field,
+                                                                      discretization_name,
+                                                                      parameterization_name_field,
+                                                                      parameterization_name)
+    arcpy.management.MakeTableView(parameters_elements_table, table_view, expression)
+    arcpy.management.AddJoin(table_view, "ElementID", discretization_feature_class, "Element_ID")
+    centroid_x_field = arcpy.AddFieldDelimiters(workspace, "{}.CentroidX".format(table_name))
+    centroid_y_field = arcpy.AddFieldDelimiters(workspace, "{}.CentroidY".format(table_name))
+    discretization_centroid_x_field = "!{}!"\
+        .format(arcpy.AddFieldDelimiters(workspace, "{}.CentroidX".format(discretization_elements)))
+    discretization_centroid_y_field = "!{}!"\
+        .format(arcpy.AddFieldDelimiters(workspace, "{}.CentroidY".format(discretization_elements)))
+    expression = "{0} {1};{2} {3}".format(centroid_x_field, discretization_centroid_x_field, centroid_y_field,
+                                          discretization_centroid_y_field)
+    tweet(expression)
+    arcpy.management.CalculateFields(table_view, "PYTHON3", expression, '', "NO_ENFORCE_DOMAINS")
+    arcpy.management.RemoveJoin(table_view, discretization_elements)
+    arcpy.management.Delete(table_view)
+    arcpy.management.DeleteField(discretization_feature_class, "CentroidX;CentroidY", "DELETE_FIELDS")
+
+
+def calculate_geometries(workspace, delineation_name, discretization_name, parameterization_name,
+                         save_intermediate_outputs):
+    return
