@@ -175,6 +175,10 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     tweet("Calculating element centroids")
     calculate_centroids(workspace, delineation_name, discretization, parameterization_name, save_intermediate_outputs)
 
+    tweet("Calculating stream lengths")
+    calculate_stream_length(workspace, delineation_name, discretization, parameterization_name,
+                            save_intermediate_outputs)
+
     tweet("Calculating element geometries")
     calculate_geometries(workspace, delineation_name, discretization, parameterization_name, save_intermediate_outputs)
 
@@ -198,12 +202,16 @@ def populate_parameter_tables(workspace, delineation_name, discretization_name, 
     streams_fields = ["Stream_ID"]
     parameters_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "StreamID"]
     streams_feature_class = os.path.join(workspace, "{}_streams".format(discretization_name))
+    if not arcpy.TestSchemaLock(parameters_streams_table):
+        msg = "Cannot proceed. \nCould not acquire schema lock on table '{}'.".format(parameters_streams_table)
+        tweet(msg)
+        raise Exception(msg)
     with arcpy.da.SearchCursor(streams_feature_class, streams_fields) as streams_cursor:
         for stream_row in streams_cursor:
             stream_id = stream_row[0]
             with arcpy.da.InsertCursor(parameters_streams_table, parameters_fields) as parameters_cursor:
-                parameters_cursor.insertRow(
-                    (delineation_name, discretization_name, parameterization_name, stream_id))
+                parameters_cursor.insertRow((delineation_name, discretization_name, parameterization_name,
+                                             stream_id))
 
 
 def calculate_mean_elevation(workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
@@ -361,7 +369,6 @@ def calculate_centroids(workspace, delineation_name, discretization_name, parame
         .format(arcpy.AddFieldDelimiters(workspace, "{}.CentroidY".format(discretization_elements)))
     expression = "{0} {1};{2} {3}".format(centroid_x_field, discretization_centroid_x_field, centroid_y_field,
                                           discretization_centroid_y_field)
-    tweet(expression)
     arcpy.management.CalculateFields(table_view, "PYTHON3", expression, '', "NO_ENFORCE_DOMAINS")
     arcpy.management.RemoveJoin(table_view, discretization_elements)
     arcpy.management.Delete(table_view)
@@ -371,3 +378,28 @@ def calculate_centroids(workspace, delineation_name, discretization_name, parame
 def calculate_geometries(workspace, delineation_name, discretization_name, parameterization_name,
                          save_intermediate_outputs):
     return
+
+
+def calculate_stream_length(workspace, delineation_name, discretization_name, parameterization_name,
+                            save_intermediate_outputs):
+    table_name = "parameters_streams_physical"
+    parameters_streams_table = os.path.join(workspace, table_name)
+    discretization_streams = "{}_streams".format(discretization_name)
+    streams_feature_class = os.path.join(workspace, discretization_streams)
+
+    table_view = "{}_tableview".format(table_name)
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                      discretization_name_field,
+                                                                      discretization_name,
+                                                                      parameterization_name_field,
+                                                                      parameterization_name)
+    arcpy.management.MakeTableView(parameters_streams_table, table_view, expression)
+    arcpy.management.AddJoin(table_view, "StreamID", streams_feature_class, "Stream_ID")
+    stream_length_field = arcpy.AddFieldDelimiters(workspace, "{}.StreamLength".format(table_name))
+    shape_length_field = arcpy.AddFieldDelimiters(workspace, "{}.Shape_Length".format(discretization_streams))
+    arcpy.management.CalculateField(table_view, stream_length_field, "!{}!".format(shape_length_field), "PYTHON3")
+    arcpy.management.RemoveJoin(table_view, discretization_streams)
+    arcpy.management.Delete(table_view)

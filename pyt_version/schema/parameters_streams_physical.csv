@@ -1,2 +1,2 @@
-DelineationName,DiscretizationName,ParameterizationName,StreamID,LateralArea,UpstreamArea,MeanSlope,CentroidX,CentroidY,DownstreamWidth,UpstreamWidth,DownstreamDepth,UpstreamDepth,SideSlope1,SideSlope2,CreationDate,AGWAVersionAtCreation,AGWAGDBVersionAtCreation,Status
-text,text,text,1,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,6/29/2022,text,text,text
+DelineationName,DiscretizationName,ParameterizationName,StreamID,StreamLength,LateralArea,UpstreamArea,MeanSlope,CentroidX,CentroidY,DownstreamWidth,UpstreamWidth,DownstreamDepth,UpstreamDepth,SideSlope1,SideSlope2,CreationDate,AGWAVersionAtCreation,AGWAGDBVersionAtCreation,Status
+text,text,text,1,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,6/29/2022,text,text,text
