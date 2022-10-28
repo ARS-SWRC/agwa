@@ -65,7 +65,8 @@ class ParameterizeElements(object):
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
-        param2.filter.list = ["Geometric Abstraction"]
+        param2.filter.list = ["Plane Average"]
+        # TODO: Add Geometric Abstraction method back once calculation of headwater flow length is finalized
         # param2.filter.list = ["Geometric Abstraction", "Plane Average"]
         param2.value = param2.filter.list[0]
 
@@ -211,8 +212,13 @@ class ParameterizeElements(object):
         workspace_par = parameters[7].valueAsText
         save_intermediate_outputs_par = parameters[9].valueAsText.lower() == 'true'
 
+        flow_length_enum = None
+        if flow_length_par == "Plane Average":
+            flow_length_enum = agwa.FlowLength.plane_average.name
+        elif flow_length_par == "Geometric Abstraction":
+            flow_length_enum = agwa.FlowLength.geometric_abstraction.name
         agwa.initialize_workspace(workspace_par, discretization_par, parameterization_name_par, slope_par,
-                                  flow_length_par, hgr_par, channel_par)
+                                  flow_length_enum, hgr_par, channel_par)
         agwa.parameterize(workspace_par, discretization_par, parameterization_name_par, save_intermediate_outputs_par)
         return
 

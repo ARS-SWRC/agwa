@@ -3,6 +3,7 @@ import arcpy
 import arcpy.management  # Import statement added to provide intellisense in PyCharm
 import os
 import datetime
+from enum import Enum
 
 
 # Check out any necessary licenses
@@ -124,7 +125,7 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
         for row in cursor:
             delineation_name = row[0]
             slope_type = row[1]
-            flow_length_type = row[2]
+            flow_length_enum = FlowLength[row[2]]
             hydraulic_geometry_relationship = row[3]
             channel_type = row[4]
         if row is None:
@@ -156,6 +157,10 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     tweet("Populating parameter tables")
     populate_parameter_tables(workspace, delineation_name, discretization, parameterization_name)
 
+    tweet("Calculating element areas")
+    calculate_element_areas(workspace, delineation_name, discretization, parameterization_name,
+                            save_intermediate_outputs)
+
     tweet("Calculating mean elevation")
     calculate_mean_elevation(workspace, delineation_name, discretization, parameterization_name,
                              unfilled_dem_raster, save_intermediate_outputs)
@@ -180,7 +185,8 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
                             save_intermediate_outputs)
 
     tweet("Calculating element geometries")
-    calculate_geometries(workspace, delineation_name, discretization, parameterization_name, save_intermediate_outputs)
+    calculate_geometries(workspace, delineation_name, discretization, parameterization_name, flow_length_enum,
+                         save_intermediate_outputs)
 
     return
 
@@ -375,9 +381,98 @@ def calculate_centroids(workspace, delineation_name, discretization_name, parame
     arcpy.management.DeleteField(discretization_feature_class, "CentroidX;CentroidY", "DELETE_FIELDS")
 
 
-def calculate_geometries(workspace, delineation_name, discretization_name, parameterization_name,
+def calculate_element_areas(workspace, delineation_name, discretization_name, parameterization_name,
+                            save_intermediate_outputs):
+    table_name = "parameters_elements_physical"
+    parameters_elements_table = os.path.join(workspace, table_name)
+    discretization_elements = "{}_elements".format(discretization_name)
+    discretization_feature_class = os.path.join(workspace, discretization_elements)
+
+    table_view = "{}_tableview".format(table_name)
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' AND" \
+                 " {2} = '{3}' AND" \
+                 " {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                       discretization_name_field, discretization_name,
+                                       parameterization_name_field, parameterization_name)
+    arcpy.management.MakeTableView(parameters_elements_table, table_view, expression)
+    arcpy.management.AddJoin(table_view, "ElementID", discretization_feature_class, "Element_ID")
+    area_field = arcpy.AddFieldDelimiters(workspace, "{}.Area".format(table_name))
+    shape_area_field = arcpy.AddFieldDelimiters(workspace, "{}.Shape_Area".format(discretization_elements))
+    arcpy.management.CalculateField(table_view, area_field, "!{}!".format(shape_area_field), "PYTHON3")
+    arcpy.management.RemoveJoin(table_view, discretization_elements)
+    arcpy.management.Delete(table_view)
+
+
+def calculate_geometries(workspace, delineation_name, discretization_name, parameterization_name, flow_length_enum,
                          save_intermediate_outputs):
-    return
+    elements_table_name = "parameters_elements_physical"
+    streams_table_name = "parameters_streams_physical"
+    parameters_elements_table = os.path.join(workspace, elements_table_name)
+    parameters_elements_table = os.path.join(workspace, streams_table_name)
+
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    stream_id_field = arcpy.AddFieldDelimiters(workspace, "StreamID")
+    expression = "{0} = '{1}' AND" \
+                 " {2} = '{3}' AND" \
+                 " {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                       discretization_name_field, discretization_name,
+                                       parameterization_name_field, parameterization_name)
+    if flow_length_enum is FlowLength.geometric_abstraction:
+        elements_fields = ["ElementID", "Area", "Width", "Length"]
+        streams_fields = ["StreamLength"]
+
+        with arcpy.da.UpdateCursor(parameters_elements_table, elements_fields, expression) as elements_cursor:
+            for element_row in elements_cursor:
+                element_id = element_row[0]
+                area = element_row[1]
+                stream_id = round(element_id / 10) * 10 + 4
+                expression = "{0} = '{1}' AND" \
+                             " {2} = '{3}' AND " \
+                             " {4} = '{5}' AND " \
+                             " {6} = {7}".format(delineation_name_field, delineation_name,
+                                                 discretization_name_field, discretization_name,
+                                                 parameterization_name_field, parameterization_name,
+                                                 stream_id_field, stream_id)
+                with arcpy.da.SearchCursor(parameters_elements_table, streams_fields, expression) as streams_cursor:
+                    for stream_row in streams_cursor:
+                        if element_id % 10 == 2 or element_id % 10 == 3:
+                            width = stream_row[0]
+                            length = area / width
+                            element_row[2] = width
+                            element_row[3] = length
+                            elements_cursor.updateRow(element_row)
+                        else:
+                            # assume shape of headwater element is a triangles
+                            #  and use its centroid
+                            width = stream_row[0]
+                            length = area / width
+    elif flow_length_enum is FlowLength.plane_average:
+        table_name = "parameters_elements_physical"
+        parameters_elements_table = os.path.join(workspace, table_name)
+
+        table_view = "{}_tableview".format(table_name)
+        delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+        discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+        parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+        expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                          discretization_name_field,
+                                                                          discretization_name,
+                                                                          parameterization_name_field,
+                                                                          parameterization_name)
+        arcpy.management.MakeTableView(parameters_elements_table, table_view, expression)
+        area_field = arcpy.AddFieldDelimiters(workspace, "Area")
+        mean_flow_length_field = arcpy.AddFieldDelimiters(workspace, "MeanFlowLength")
+        width_field = arcpy.AddFieldDelimiters(workspace, "Width")
+        length_field = arcpy.AddFieldDelimiters(workspace, "Length")
+        arcpy.management.CalculateField(table_view, width_field, "!{0}! / !{1}!".
+                                        format(area_field, mean_flow_length_field), "PYTHON3")
+        arcpy.management.CalculateField(table_view, length_field, "!{}!".format(mean_flow_length_field), "PYTHON3")
+        arcpy.management.Delete(table_view)
 
 
 def calculate_stream_length(workspace, delineation_name, discretization_name, parameterization_name,
@@ -403,3 +498,8 @@ def calculate_stream_length(workspace, delineation_name, discretization_name, pa
     arcpy.management.CalculateField(table_view, stream_length_field, "!{}!".format(shape_length_field), "PYTHON3")
     arcpy.management.RemoveJoin(table_view, discretization_streams)
     arcpy.management.Delete(table_view)
+
+
+class FlowLength(Enum):
+    geometric_abstraction = 1
+    plane_average = 2
