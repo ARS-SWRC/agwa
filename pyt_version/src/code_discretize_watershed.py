@@ -415,7 +415,7 @@ def identify_contributing_channels(workspace, delineation_name, discretization_n
         result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
         contributing_channels_table = result.getOutput(0)
 
-    creation_date = datetime.datetime.now().isoformat()
+    creation_date = datetime.datetime.now()
     streams_fields = ["from_node", "Stream_ID"]
     contrib_fields = ["DelineationName", "DiscretizationName", "StreamID", "ContributingStream", "CreationDate"]
     # expression = "{0} = '{1}' AND {2} = '{3}'".format(arcpy.AddFieldDelimiters(workspace, "to_node"), missing_to_node)
