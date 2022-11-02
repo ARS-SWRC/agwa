@@ -4,7 +4,7 @@ import arcpy.management  # Import statement added to provide intellisense in PyC
 import os
 import datetime
 from enum import Enum
-
+from collections import deque
 
 # Check out any necessary licenses
 arcpy.CheckOutExtension("spatial")
@@ -187,6 +187,10 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     tweet("Calculating element geometries")
     calculate_geometries(workspace, delineation_name, discretization, parameterization_name, flow_length_enum,
                          save_intermediate_outputs)
+
+    tweet("Calculating stream sequence")
+    calculate_stream_sequence(workspace, delineation_name, discretization, parameterization_name,
+                              save_intermediate_outputs)
 
     return
 
@@ -498,6 +502,102 @@ def calculate_stream_length(workspace, delineation_name, discretization_name, pa
     arcpy.management.CalculateField(table_view, stream_length_field, "!{}!".format(shape_length_field), "PYTHON3")
     arcpy.management.RemoveJoin(table_view, discretization_streams)
     arcpy.management.Delete(table_view)
+
+
+def calculate_stream_sequence(workspace, delineation_name, discretization_name, parameterization_name,
+                              save_intermediate_outputs):
+    # TODO: Replace function comments with docstring style comments
+    # Outlet stream has highest sequence
+    # Identify outlet using discretization nodes feature class where node_type = 'outlet'
+    # Query for stream outlet and push on to unprocessedStack
+    # While unprocessedStack is not empty
+    #   peek at unprocessedStack to get streamID
+    #   If channelsList has current streamID
+    #       push stream ID on to processedStack
+    #   Add streamID to channelsList
+    #   query for streams contributing to streamID
+    #       If no contributing streams
+    #           push top of unprocessedStack onto processedStack
+    #       while contributing streams
+    #           push contributing stream onto unProcessedStack
+
+    discretization_nodes = "{}_nodes".format(discretization_name)
+    nodes_feature_class = os.path.join(workspace, discretization_nodes)
+    node_type_field = arcpy.AddFieldDelimiters(workspace, "node_type")
+    expression = "{0} = '{1}'".format(node_type_field, "outlet")
+    fields = ["arcid", "grid_code", "from_node", "to_node"]
+    attdict = {}
+    with arcpy.da.SearchCursor(nodes_feature_class, fields, expression) as nodes_cursor:
+        for nodes_row in nodes_cursor:
+            attdict["outlet"] = dict(zip(nodes_cursor.fields, nodes_row))
+
+    arcid_field = arcpy.AddFieldDelimiters(workspace, "arcid")
+    grid_code_field = arcpy.AddFieldDelimiters(workspace, "grid_code")
+    from_node_field = arcpy.AddFieldDelimiters(workspace, "from_node")
+    to_node_field = arcpy.AddFieldDelimiters(workspace, "to_node")
+    expression = "{0} = {1} And {2} = {3} And {4} = {5} And {6} = {7}".\
+        format(arcid_field, attdict["outlet"]["arcid"],
+               grid_code_field, attdict["outlet"]["grid_code"],
+               from_node_field, attdict["outlet"]["from_node"],
+               to_node_field, attdict["outlet"]["to_node"])
+
+    discretization_streams = "{}_streams".format(discretization_name)
+    streams_feature_class = os.path.join(workspace, discretization_streams)
+    stream_count = int(arcpy.management.GetCount(streams_feature_class).getOutput(0))
+    fields = ["Stream_ID"]
+    stream_id = None
+    with arcpy.da.SearchCursor(streams_feature_class, fields, expression) as streams_cursor:
+        for streams_row in streams_cursor:
+            stream_id = streams_row[0]
+
+    contributing_channels_table_name = "contributing_channels"
+    contributing_channels_table = os.path.join(workspace, contributing_channels_table_name)
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    expression = "{0} = '{1}' And {2} = '{3}'".format(delineation_name_field, delineation_name,
+                                                      discretization_name_field, discretization_name)
+
+    contrib_table_view = "{}_tableview".format(contributing_channels_table_name)
+    arcpy.management.MakeTableView(contributing_channels_table, contrib_table_view, expression)
+    stream_id_field = arcpy.AddFieldDelimiters(workspace, "StreamID")
+    fields = ["ContributingStream"]
+    unprocessed_stack = deque()
+    unprocessed_stack.append(stream_id)
+    processed_stack = deque()
+    streams_list = []
+    while unprocessed_stack:
+        stream_id = unprocessed_stack[-1]
+        if stream_id in streams_list:
+            processed_stream = unprocessed_stack.pop()
+            processed_stack.append(processed_stream)
+            continue
+
+        streams_list.append(stream_id)
+
+        expression = "{0} = {1}".format(stream_id_field, stream_id)
+        with arcpy.da.SearchCursor(contributing_channels_table, fields, expression) as contrib_cursor:
+            contrib_row = None
+            for contrib_row in contrib_cursor:
+                contributing_stream_id = contrib_row[0]
+                unprocessed_stack.append(contributing_stream_id)
+            if contrib_row is None:
+                # No contributing streams so add to the processed stack
+                processed_stream = unprocessed_stack.pop()
+                processed_stack.append(processed_stream)
+
+    # The processed_stack is now in order with the watershed outlet stream at the top of the stack
+    table_name = "parameters_streams_physical"
+    parameters_streams_table = os.path.join(workspace, table_name)
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    fields = ["Sequence"]
+    for sequence in range(1, stream_count+1):
+        stream_id = processed_stack.popleft()
+        expression = "{0} = '{1}' And {2} = {3}".format(parameterization_name_field, parameterization_name,
+                                                        stream_id_field, stream_id)
+        with arcpy.da.UpdateCursor(parameters_streams_table, fields, expression) as cursor:
+            for row in cursor:
+                row[0] = sequence
+                cursor.updateRow(row)
 
 
 class FlowLength(Enum):
