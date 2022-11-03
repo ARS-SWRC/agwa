@@ -192,6 +192,10 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     calculate_stream_sequence(workspace, delineation_name, discretization, parameterization_name,
                               save_intermediate_outputs)
 
+    tweet("Calculating contributing areas")
+    calculate_contributing_area_k2(workspace, delineation_name, discretization, parameterization_name,
+                                   save_intermediate_outputs)
+
     return
 
 
@@ -575,7 +579,7 @@ def calculate_stream_sequence(workspace, delineation_name, discretization_name, 
         streams_list.append(stream_id)
 
         expression = "{0} = {1}".format(stream_id_field, stream_id)
-        with arcpy.da.SearchCursor(contributing_channels_table, fields, expression) as contrib_cursor:
+        with arcpy.da.SearchCursor(contrib_table_view, fields, expression) as contrib_cursor:
             contrib_row = None
             for contrib_row in contrib_cursor:
                 contributing_stream_id = contrib_row[0]
@@ -598,6 +602,127 @@ def calculate_stream_sequence(workspace, delineation_name, discretization_name, 
             for row in cursor:
                 row[0] = sequence
                 cursor.updateRow(row)
+
+    arcpy.management.Delete(contrib_table_view)
+
+
+def calculate_contributing_area_k2(workspace, delineation_name, discretization_name, parameterization_name,
+                                   save_intermediate_outputs):
+    # TODO: Replace function comments with docstring style comments
+    # Calculate contributing areas by starting at the top of the watershed
+    # and moving towards the outlet
+    # Iterate through parameters_streams_physical by sequence number
+    # This results in the headwater areas being calculated first
+    # so moving towards the outlet the upstream contributing areas
+    # can be added
+
+    parameters_streams_physical_table_name = "parameters_streams_physical"
+    parameters_streams_table = os.path.join(workspace, parameters_streams_physical_table_name)
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'". \
+        format(delineation_name_field, delineation_name,
+               discretization_name_field, discretization_name,
+               parameterization_name_field, parameterization_name)
+    parameters_streams_table_view = "{}_tableview".format(parameters_streams_table)
+    arcpy.management.MakeTableView(parameters_streams_table, parameters_streams_table_view, expression)
+    stream_count = int(arcpy.management.GetCount(parameters_streams_table_view).getOutput(0))
+
+    parameters_elements_physical_table_name = "parameters_elements_physical"
+    parameters_elements_table = os.path.join(workspace, parameters_elements_physical_table_name)
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'". \
+        format(delineation_name_field, delineation_name,
+               discretization_name_field, discretization_name,
+               parameterization_name_field, parameterization_name)
+    parameters_elements_table_view = "{}_tableview".format(parameters_elements_table)
+    arcpy.management.MakeTableView(parameters_elements_table, parameters_elements_table_view, expression)
+
+    contributing_channels_table_name = "contributing_channels"
+    contributing_channels_table = os.path.join(workspace, contributing_channels_table_name)
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    expression = "{0} = '{1}' And {2} = '{3}'".format(delineation_name_field, delineation_name,
+                                                      discretization_name_field, discretization_name)
+    contrib_table_view = "{}_tableview".format(contributing_channels_table_name)
+    arcpy.management.MakeTableView(contributing_channels_table, contrib_table_view, expression)
+
+    stream_id_field = arcpy.AddFieldDelimiters(workspace, "StreamID")
+    sequence_field = arcpy.AddFieldDelimiters(workspace, "Sequence")
+    element_id_field = arcpy.AddFieldDelimiters(workspace, "ElementID")
+    fields_cursor1 = ["StreamID", "LateralArea", "UpstreamArea"]
+    fields_cursor2 = ["Area"]
+    fields_cursor3 = ["ContributingStream"]
+    fields_cursor4 = ["LateralArea", "UpstreamArea"]
+    for sequence in range(1, stream_count + 1):
+        expression = "{0} = {1}".format(sequence_field, sequence)
+        with arcpy.da.UpdateCursor(parameters_streams_table_view, fields_cursor1, expression) as cursor:
+            for row in cursor:
+                stream_id = row[0]
+                left_lateral_id = stream_id - 1
+                right_lateral_id = stream_id - 2
+                headwater_id = stream_id - 3
+
+                lateral_area = 0
+                headwater_area = None
+                upstream_area = None
+
+                # Determine lateral_area
+                expression = "{0} = '{1}' And " \
+                             "{2} = '{3}' And " \
+                             "{4} = '{5}' And " \
+                             "{6} = {7} Or " \
+                             "{8} = {9}".format(delineation_name_field, delineation_name,
+                                                discretization_name_field, discretization_name,
+                                                parameterization_name_field, parameterization_name,
+                                                element_id_field, left_lateral_id,
+                                                element_id_field, right_lateral_id)
+
+                with arcpy.da.SearchCursor(parameters_elements_table_view, fields_cursor2,
+                                           expression) as elements_cursor:
+                    for element_row in elements_cursor:
+                        print("lateral area: ", str(element_row[0]))
+                        lateral_area += element_row[0]
+                # Determine headwater_area
+                expression = "{0} = '{1}' And " \
+                             "{2} = '{3}' And " \
+                             "{4} = '{5}' And " \
+                             "{6} = {7}".format(delineation_name_field, delineation_name,
+                                                discretization_name_field, discretization_name,
+                                                parameterization_name_field, parameterization_name,
+                                                element_id_field, headwater_id)
+                with arcpy.da.SearchCursor(parameters_elements_table_view, fields_cursor2,
+                                           expression) as elements_cursor:
+                    for element_row in elements_cursor:
+                        print("headwater area: ", str(element_row[0]))
+                        headwater_area = element_row[0]
+
+                # Determine upstream_area
+                if headwater_area is None:
+                    expression = "{0} = {1}".format(stream_id_field, stream_id)
+                    expression2 = ""
+                    with arcpy.da.SearchCursor(contrib_table_view, fields_cursor3, expression) as contrib_cursor:
+                        for contrib_row in contrib_cursor:
+                            expression2 += "{0} = {1} Or ".format(stream_id_field, contrib_row[0])
+
+                    expression2 = expression2[:-4]
+                    upstream_area = 0
+                    with arcpy.da.SearchCursor(parameters_streams_table_view, fields_cursor4, expression2) as \
+                            contrib_cursor:
+                        for contrib_row in contrib_cursor:
+                            upstream_area += contrib_row[0] + contrib_row[1]
+
+                row[1] = lateral_area
+                if headwater_area:
+                    row[2] = headwater_area
+                elif upstream_area:
+                    row[2] = upstream_area
+
+                cursor.updateRow(row)
+
+    arcpy.management.Delete(contrib_table_view)
+    arcpy.management.Delete(parameters_streams_table_view)
+    arcpy.management.Delete(parameters_elements_table_view)
 
 
 class FlowLength(Enum):
