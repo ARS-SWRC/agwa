@@ -70,7 +70,7 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
         raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_workspace_table))
 
     fields = ["UnfilledDEMName", "UnfilledDEMPath", "FilledDEMName", "FilledDEMPath", "FDName", "FDPath", "FAName",
-              "FAPath", "FlUpName", "FlUpPath", "SlopeName", "SlopePath", "AspectName", "AspectPath"]
+              "FAPath", "FlUpName", "FlUpPath", "SlopeName", "SlopePath", "AspectName", "AspectPath", "AGWADirectory"]
     row = None
     expression = "{0} = '{1}'".format(arcpy.AddFieldDelimiters(workspace, "DelineationWorkspace"), workspace)
     with arcpy.da.SearchCursor(meta_workspace_table, fields, expression) as cursor:
@@ -95,6 +95,8 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
 
             aspect_name = row[12]
             aspect_path = row[13]
+
+            agwa_directory = row[14]
         if row is None:
             msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
                 meta_workspace_table, "DelineationWorkspace", workspace)
@@ -198,7 +200,11 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
 
     tweet("Calculating stream slopes and centroids")
     calculate_stream_slope(workspace, delineation_name, discretization, parameterization_name, unfilled_dem_raster,
-                                   save_intermediate_outputs)
+                           save_intermediate_outputs)
+
+    tweet("Calculating stream geometries")
+    calculate_stream_geometries(workspace, delineation_name, discretization, parameterization_name,
+                                hydraulic_geometry_relationship, agwa_directory, save_intermediate_outputs)
 
     return
 
@@ -730,7 +736,7 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
 
 
 def calculate_stream_slope(workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
-                            save_intermediate_outputs):
+                           save_intermediate_outputs):
     parameters_streams_physical_table_name = "parameters_streams_physical"
     parameters_streams_table = os.path.join(workspace, parameters_streams_physical_table_name)
     discretization_streams = "{}_streams".format(discretization_name)
@@ -769,7 +775,7 @@ def calculate_stream_slope(workspace, delineation_name, discretization_name, par
     calculate_expression = "{0} !{1}!;{2} !{3}!".format(centroid_x_field, streams_centroid_x_field,
                                                         centroid_y_field, streams_centroid_y_field)
     arcpy.management.CalculateFields(parameters_streams_table_view, "PYTHON3",
-                                     calculate_expression,'', "NO_ENFORCE_DOMAINS")
+                                     calculate_expression, '', "NO_ENFORCE_DOMAINS")
 
     # Remove join
     arcpy.management.RemoveJoin(parameters_streams_table_view, discretization_streams)
@@ -840,6 +846,89 @@ def calculate_stream_slope(workspace, delineation_name, discretization_name, par
         arcpy.management.Delete(downstream_points_feature_class)
         arcpy.management.Delete(sample_upstream_table)
         arcpy.management.Delete(sample_downstream_table)
+
+
+def calculate_stream_geometries(workspace, delineation_name, discretization_name, parameterization_name,
+                                hydraulic_geometry_relationship, agwa_directory, save_intermediate_outputs):
+    parameters_streams_physical_table_name = "parameters_streams_physical"
+    parameters_streams_table = os.path.join(workspace, parameters_streams_physical_table_name)
+
+    # Streams table view of input delineation, discretization, and parameterization
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                      discretization_name_field,
+                                                                      discretization_name,
+                                                                      parameterization_name_field,
+                                                                      parameterization_name)
+    parameters_streams_table_view = "{}_tableview".format(parameters_streams_physical_table_name)
+    arcpy.management.MakeTableView(parameters_streams_table, parameters_streams_table_view, expression)
+
+    # Acquire channel width and depth coefficients and exponents from the hydraulic geometry relationship table
+    datafiles_directory = os.path.join(agwa_directory, "datafiles")
+    hgr_table = os.path.join(datafiles_directory, "HGR.dbf")
+
+    width_coefficient = None
+    width_exponent = None
+    depth_coefficient = None
+    depth_exponent = None
+    fields = ["wCoef", "wExp", "dCoef", "dExp"]
+    name_field = arcpy.AddFieldDelimiters(workspace, "HGRNAME")
+    expression = "{0} = '{1}'".format(name_field, hydraulic_geometry_relationship)
+    with arcpy.da.SearchCursor(hgr_table, fields, expression) as cursor:
+        for row in cursor:
+            width_coefficient = row[0]
+            width_exponent = row[1]
+            depth_coefficient = row[2]
+            depth_exponent = row[3]
+
+    # Calculate side slopes first so they can be used to calculate bottom width of channel from bank full depth
+    side_slope1 = 1
+    side_slope2 = 1
+    side_slope1_field = arcpy.AddFieldDelimiters(workspace, "SideSlope1")
+    side_slope2_field = arcpy.AddFieldDelimiters(workspace, "SideSlope2")
+    expression = "{0} {1};{2} {3}".format(side_slope1_field, side_slope1, side_slope2_field, side_slope2)
+    arcpy.management.CalculateFields(parameters_streams_table_view, "PYTHON3",
+                                     expression, '', "NO_ENFORCE_DOMAINS")
+
+    upstream_bankfull_depth_field = arcpy.AddFieldDelimiters(workspace, "UpstreamBankfullDepth")
+    downstream_bankfull_depth_field = arcpy.AddFieldDelimiters(workspace, "DownstreamBankfullDepth")
+    upstream_bankfull_width_field = arcpy.AddFieldDelimiters(workspace, "UpstreamBankfullWidth")
+    downstream_bankfull_width_field = arcpy.AddFieldDelimiters(workspace, "DownstreamBankfullWidth")
+    upstream_bottom_width_field = arcpy.AddFieldDelimiters(workspace, "UpstreamBottomWidth")
+    downstream_bottom_width_field = arcpy.AddFieldDelimiters(workspace, "DownstreamBottomWidth")
+    # upstream bankfull depth calculation
+    expression = "{0} * math.pow(!UpstreamArea!, {1})".format(depth_coefficient, depth_exponent)
+    arcpy.management.CalculateField(parameters_streams_table_view, upstream_bankfull_depth_field,
+                                    expression, "PYTHON3", '', "TEXT",
+                                    "NO_ENFORCE_DOMAINS")
+    # downstream bankfull depth calculation
+    expression = "{0} * math.pow(!UpstreamArea! + !LateralArea!, {1})".format(depth_coefficient, depth_exponent)
+    arcpy.management.CalculateField(parameters_streams_table_view, downstream_bankfull_depth_field,
+                                    expression, "PYTHON3", '', "TEXT",
+                                    "NO_ENFORCE_DOMAINS")
+    # upstream bankfull width calculation
+    expression = "{0} * math.pow(!UpstreamArea!, {1})".format(width_coefficient, width_exponent)
+    arcpy.management.CalculateField(parameters_streams_table_view, upstream_bankfull_width_field,
+                                    expression, "PYTHON3", '', "TEXT",
+                                    "NO_ENFORCE_DOMAINS")
+    # downstream bankfull width calculation
+    expression = "{0} * math.pow(!UpstreamArea! + !LateralArea!, {1})".format(width_coefficient, width_exponent)
+    arcpy.management.CalculateField(parameters_streams_table_view, downstream_bankfull_width_field,
+                                    expression, "PYTHON3", '', "TEXT",
+                                    "NO_ENFORCE_DOMAINS")
+
+    # upstream bottom width calculation
+    expression = "!UpstreamBankfullWidth! - !UpstreamBankfullDepth! * (1/!SideSlope1! + 1/!SideSlope2!)"
+    arcpy.management.CalculateField(parameters_streams_table_view, upstream_bottom_width_field,
+                                    expression, "PYTHON3", '', "TEXT",
+                                    "NO_ENFORCE_DOMAINS")
+    # downstream bottom width calculation
+    expression = "!DownstreamBankfullWidth! - !UpstreamBankfullDepth! * (1/!SideSlope1! + 1/!SideSlope2!)"
+    arcpy.management.CalculateField(parameters_streams_table_view, downstream_bottom_width_field,
+                                    expression, "PYTHON3", '', "TEXT",
+                                    "NO_ENFORCE_DOMAINS")
 
 
 class FlowLength(Enum):
