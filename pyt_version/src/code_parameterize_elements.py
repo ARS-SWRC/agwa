@@ -196,6 +196,10 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     calculate_contributing_area_k2(workspace, delineation_name, discretization, parameterization_name,
                                    save_intermediate_outputs)
 
+    tweet("Calculating stream slopes and centroids")
+    calculate_stream_slope(workspace, delineation_name, discretization, parameterization_name, unfilled_dem_raster,
+                                   save_intermediate_outputs)
+
     return
 
 
@@ -723,6 +727,119 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
     arcpy.management.Delete(contrib_table_view)
     arcpy.management.Delete(parameters_streams_table_view)
     arcpy.management.Delete(parameters_elements_table_view)
+
+
+def calculate_stream_slope(workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
+                            save_intermediate_outputs):
+    parameters_streams_physical_table_name = "parameters_streams_physical"
+    parameters_streams_table = os.path.join(workspace, parameters_streams_physical_table_name)
+    discretization_streams = "{}_streams".format(discretization_name)
+    streams_feature_class = os.path.join(workspace, discretization_streams)
+
+    # Streams table view of input delineation, discretization, and parameterization
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                      discretization_name_field,
+                                                                      discretization_name,
+                                                                      parameterization_name_field,
+                                                                      parameterization_name)
+    parameters_streams_table_view = "{}_tableview".format(parameters_streams_physical_table_name)
+    arcpy.management.MakeTableView(parameters_streams_table, parameters_streams_table_view, expression)
+
+    arcpy.management.AddFields(streams_feature_class, "UpstreamX FLOAT # # # #;UpstreamY FLOAT # # # #;"
+                                                      "DownstreamX FLOAT # # # #;DownstreamY FLOAT # # # #"
+                                                      "CentroidX FLOAT # # # #;CentroidY FLOAT # # # #;", None)
+
+    arcpy.management.CalculateGeometryAttributes(streams_feature_class,
+                                                 "UpstreamX LINE_START_X;""UpstreamY LINE_START_Y;"
+                                                 "DownstreamX LINE_END_X;""DownstreamY LINE_END_Y;"
+                                                 "CentroidX CENTROID_X;""CentroidY CENTROID_X",
+                                                 '', '', None, "DD")
+
+    # Join
+    arcpy.management.AddJoin(parameters_streams_table_view, "StreamID", streams_feature_class, "Stream_ID")
+
+    # Calculate centroid
+    centroid_x_field = "{0}.{1}".format(parameters_streams_physical_table_name, "CentroidX")
+    centroid_y_field = "{0}.{1}".format(parameters_streams_physical_table_name, "CentroidY")
+    streams_centroid_x_field = "{0}.{1}".format(discretization_streams, "CentroidX")
+    streams_centroid_y_field = "{0}.{1}".format(discretization_streams, "CentroidY")
+    calculate_expression = "{0} !{1}!;{2} !{3}!".format(centroid_x_field, streams_centroid_x_field,
+                                                        centroid_y_field, streams_centroid_y_field)
+    arcpy.management.CalculateFields(parameters_streams_table_view, "PYTHON3",
+                                     calculate_expression,'', "NO_ENFORCE_DOMAINS")
+
+    # Remove join
+    arcpy.management.RemoveJoin(parameters_streams_table_view, discretization_streams)
+
+    # XY Table To Point
+    upstream_points_name = "{}_XY_upstream".format(discretization_name)
+    upstream_points_feature_class = os.path.join(workspace, upstream_points_name)
+    arcpy.management.XYTableToPoint(streams_feature_class,
+                                    upstream_points_feature_class,
+                                    "UpstreamX", "UpstreamY", None, "")
+
+    # Sample
+    dem_path, dem_name = os.path.split(dem_raster)
+    sample_upstream_name = "{}_sample_upstream".format(discretization_name)
+    sample_upstream_table = os.path.join(workspace, sample_upstream_name)
+    arcpy.sa.Sample(dem_raster, upstream_points_feature_class,
+                    sample_upstream_table, "NEAREST", "Stream_ID",
+                    "CURRENT_SLICE", None, '', None, None, "ROW_WISE", "TABLE")
+
+    # XY Table To Point
+    downstream_points_name = "{}_XY_downstream".format(discretization_name)
+    downstream_points_feature_class = os.path.join(workspace, downstream_points_name)
+    arcpy.management.XYTableToPoint(streams_feature_class,
+                                    downstream_points_feature_class,
+                                    "DownstreamX", "DownstreamY", None, "")
+
+    # Sample
+    sample_downstream_name = "{}_sample_downstream".format(discretization_name)
+    sample_downstream_table = os.path.join(workspace, sample_downstream_name)
+    arcpy.sa.Sample(dem_raster, downstream_points_feature_class,
+                    sample_downstream_table, "NEAREST", "Stream_ID",
+                    "CURRENT_SLICE", None, '', None, None, "ROW_WISE", "TABLE")
+
+    # Add Join
+    join_field = "StreamID"
+    arcpy.management.AddJoin(parameters_streams_table_view, join_field, sample_upstream_name,
+                             upstream_points_name, "KEEP_ALL", "NO_INDEX_JOIN_FIELDS")
+
+    # Add Join
+    join_field = "{0}.{1}".format(parameters_streams_physical_table_name, "StreamID")
+    arcpy.management.AddJoin(parameters_streams_table_view, join_field, sample_downstream_name,
+                             downstream_points_name, "KEEP_ALL", "NO_INDEX_JOIN_FIELDS")
+    # Calculate Fields
+    upstream_field = "{0}.{1}".format(parameters_streams_physical_table_name, "UpstreamElevation")
+    downstream_field = "{0}.{1}".format(parameters_streams_physical_table_name, "DownstreamElevation")
+    sample_upstream_field = "{0}.{1}_Band_1".format(sample_upstream_name, dem_name)
+    sample_downstream_field = "{0}.{1}_Band_1".format(sample_downstream_name, dem_name)
+    calculate_expression = "{0} !{1}!;{2} !{3}!".format(upstream_field, sample_upstream_field,
+                                                        downstream_field, sample_downstream_field)
+    arcpy.management.CalculateFields(parameters_streams_table_view, "PYTHON3",
+                                     calculate_expression,
+                                     '', "NO_ENFORCE_DOMAINS")
+    # Remove Join in reverse order
+    arcpy.management.RemoveJoin(parameters_streams_table_view, sample_downstream_name)
+    arcpy.management.RemoveJoin(parameters_streams_table_view, sample_upstream_name)
+
+    # Calculate Field
+    arcpy.management.CalculateField(parameters_streams_table_view, "MeanSlope",
+                                    "(!UpstreamElevation!-!DownstreamElevation!) / !StreamLength!", "PYTHON3", '',
+                                    "TEXT", "NO_ENFORCE_DOMAINS")
+
+    arcpy.management.Delete(parameters_streams_table_view)
+    arcpy.management.DeleteField(streams_feature_class,
+                                 "UpstreamX;UpstreamY;DownstreamX;DownstreamY;CentroidX;CentroidY",
+                                 "DELETE_FIELDS")
+    if not save_intermediate_outputs:
+        arcpy.management.Delete(upstream_points_feature_class)
+        arcpy.management.Delete(downstream_points_feature_class)
+        arcpy.management.Delete(sample_upstream_table)
+        arcpy.management.Delete(sample_downstream_table)
 
 
 class FlowLength(Enum):
