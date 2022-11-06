@@ -1,2 +1,0 @@
-DelineationName,DiscretizationName,ParameterizationName,StreamID,Sequence,StreamLength,LateralArea,UpstreamArea,UpstreamElevation,DownstreamElevation,MeanSlope,CentroidX,CentroidY,UpstreamBankfullDepth,DownstreamBankfullDepth,UpstreamBankfullWidth,DownstreamBankfullWidth,UpstreamBottomWidth,DownstreamBottomWidth,SideSlope1,SideSlope2,CreationDate,AGWAVersionAtCreation,AGWAGDBVersionAtCreation,Status
-text,text,text,1,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,6/29/2022,text,text,text

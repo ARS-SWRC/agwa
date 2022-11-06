@@ -39,8 +39,8 @@ def initialize_workspace(workspace, discretization, parameterization_name, slope
 
     tweet("Writing element parameterization parameters to metadata")
     out_path = workspace
-    out_name = "metaParameterizationElements"
-    template = r"\schema\metaParameterizationElements.csv"
+    out_name = "metaParameterization"
+    template = r"\schema\metaParameterization.csv"
     config_keyword = ""
     out_alias = ""
     meta_parameterization_table = os.path.join(out_path, out_name)
@@ -112,7 +112,7 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     aspect_raster = os.path.join(aspect_path, aspect_name)
 
     tweet("Reading parameterization metadata")
-    meta_parameterization_table = os.path.join(workspace, "metaParameterizationElements")
+    meta_parameterization_table = os.path.join(workspace, "metaParameterization")
     if not arcpy.Exists(meta_parameterization_table):
         # Short-circuit and leave message
         raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_parameterization_table))
@@ -138,8 +138,8 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
 
     # Create the parameterization look-up tables if they don't exist
     out_path = workspace
-    out_name = "parameters_elements_physical"
-    template = r"\schema\parameters_elements_physical.csv"
+    out_name = "parameters_elements"
+    template = r"\schema\parameters_elements.csv"
     config_keyword = ""
     out_alias = ""
     parameters_elements_table = os.path.join(out_path, out_name)
@@ -147,8 +147,8 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
         result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
         parameters_elements_table = result.getOutput(0)
 
-    out_name = "parameters_streams_physical"
-    template = r"\schema\parameters_streams_physical.csv"
+    out_name = "parameters_streams"
+    template = r"\schema\parameters_streams.csv"
     config_keyword = ""
     out_alias = ""
     parameters_streams_table = os.path.join(out_path, out_name)
@@ -210,8 +210,8 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
 
 
 def populate_parameter_tables(workspace, delineation_name, discretization_name, parameterization_name):
-    parameters_elements_table = os.path.join(workspace, "parameters_elements_physical")
-    parameters_streams_table = os.path.join(workspace, "parameters_streams_physical")
+    parameters_elements_table = os.path.join(workspace, "parameters_elements")
+    parameters_streams_table = os.path.join(workspace, "parameters_streams")
 
     elements_fields = ["Element_ID"]
     parameters_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "ElementID"]
@@ -242,7 +242,7 @@ def calculate_mean_elevation(workspace, delineation_name, discretization_name, p
                              save_intermediate_outputs):
     arcpy.env.workspace = workspace
 
-    parameters_elements_table = os.path.join(workspace, "parameters_elements_physical")
+    parameters_elements_table = os.path.join(workspace, "parameters_elements")
     discretization_feature_class = os.path.join(workspace, "{}_elements".format(discretization_name))
     zone_field = "Element_ID"
     value_raster = dem_raster
@@ -250,7 +250,7 @@ def calculate_mean_elevation(workspace, delineation_name, discretization_name, p
     arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "DATA",
                                     "MEAN")
 
-    table_view = "parameters_elements_physical"
+    table_view = "parameters_elements"
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
     discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
     parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
@@ -272,7 +272,7 @@ def calculate_mean_elevation(workspace, delineation_name, discretization_name, p
 
 def calculate_mean_slope(workspace, delineation_name, discretization_name, parameterization_name, slope_raster,
                          save_intermediate_outputs):
-    parameters_elements_table = os.path.join(workspace, "parameters_elements_physical")
+    parameters_elements_table = os.path.join(workspace, "parameters_elements")
     discretization_feature_class = os.path.join(workspace, "{}_elements".format(discretization_name))
     zone_field = "Element_ID"
     value_raster = slope_raster
@@ -280,7 +280,7 @@ def calculate_mean_slope(workspace, delineation_name, discretization_name, param
     arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "DATA",
                                     "MEAN")
 
-    table_view = "parameters_elements_physical"
+    table_view = "parameters_elements"
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
     discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
     parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
@@ -302,7 +302,7 @@ def calculate_mean_slope(workspace, delineation_name, discretization_name, param
 
 def calculate_mean_aspect(workspace, delineation_name, discretization_name, parameterization_name, aspect_raster,
                           save_intermediate_outputs):
-    parameters_elements_table = os.path.join(workspace, "parameters_elements_physical")
+    parameters_elements_table = os.path.join(workspace, "parameters_elements")
     discretization_feature_class = os.path.join(workspace, "{}_elements".format(discretization_name))
     zone_field = "Element_ID"
     value_raster = aspect_raster
@@ -310,7 +310,7 @@ def calculate_mean_aspect(workspace, delineation_name, discretization_name, para
     arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "DATA",
                                     "MEAN")
 
-    table_view = "parameters_elements_physical"
+    table_view = "parameters_elements"
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
     discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
     parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
@@ -333,7 +333,7 @@ def calculate_mean_aspect(workspace, delineation_name, discretization_name, para
 def calculate_mean_flow_length(workspace, delineation_name, discretization_name, parameterization_name,
                                save_intermediate_outputs):
 
-    parameters_elements_table = os.path.join(workspace, "parameters_elements_physical")
+    parameters_elements_table = os.path.join(workspace, "parameters_elements")
     discretization_feature_class = os.path.join(workspace, "{}_elements".format(discretization_name))
     flow_length_down_raster = os.path.join(workspace, "{}_flow_length_downstream".format(discretization_name))
     zone_field = "Element_ID"
@@ -342,7 +342,7 @@ def calculate_mean_flow_length(workspace, delineation_name, discretization_name,
     arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "DATA",
                                     "MEAN")
 
-    table_view = "parameters_elements_physical"
+    table_view = "parameters_elements"
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
     discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
     parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
@@ -364,7 +364,7 @@ def calculate_mean_flow_length(workspace, delineation_name, discretization_name,
 
 def calculate_centroids(workspace, delineation_name, discretization_name, parameterization_name,
                         save_intermediate_outputs):
-    table_name = "parameters_elements_physical"
+    table_name = "parameters_elements"
     parameters_elements_table = os.path.join(workspace, table_name)
     discretization_elements = "{}_elements".format(discretization_name)
     discretization_feature_class = os.path.join(workspace, discretization_elements)
@@ -401,7 +401,7 @@ def calculate_centroids(workspace, delineation_name, discretization_name, parame
 
 def calculate_element_areas(workspace, delineation_name, discretization_name, parameterization_name,
                             save_intermediate_outputs):
-    table_name = "parameters_elements_physical"
+    table_name = "parameters_elements"
     parameters_elements_table = os.path.join(workspace, table_name)
     discretization_elements = "{}_elements".format(discretization_name)
     discretization_feature_class = os.path.join(workspace, discretization_elements)
@@ -426,8 +426,8 @@ def calculate_element_areas(workspace, delineation_name, discretization_name, pa
 
 def calculate_geometries(workspace, delineation_name, discretization_name, parameterization_name, flow_length_enum,
                          save_intermediate_outputs):
-    elements_table_name = "parameters_elements_physical"
-    streams_table_name = "parameters_streams_physical"
+    elements_table_name = "parameters_elements"
+    streams_table_name = "parameters_streams"
     parameters_elements_table = os.path.join(workspace, elements_table_name)
     parameters_elements_table = os.path.join(workspace, streams_table_name)
 
@@ -470,7 +470,7 @@ def calculate_geometries(workspace, delineation_name, discretization_name, param
                             width = stream_row[0]
                             length = area / width
     elif flow_length_enum is FlowLength.plane_average:
-        table_name = "parameters_elements_physical"
+        table_name = "parameters_elements"
         parameters_elements_table = os.path.join(workspace, table_name)
 
         table_view = "{}_tableview".format(table_name)
@@ -495,7 +495,7 @@ def calculate_geometries(workspace, delineation_name, discretization_name, param
 
 def calculate_stream_length(workspace, delineation_name, discretization_name, parameterization_name,
                             save_intermediate_outputs):
-    table_name = "parameters_streams_physical"
+    table_name = "parameters_streams"
     parameters_streams_table = os.path.join(workspace, table_name)
     discretization_streams = "{}_streams".format(discretization_name)
     streams_feature_class = os.path.join(workspace, discretization_streams)
@@ -600,7 +600,7 @@ def calculate_stream_sequence(workspace, delineation_name, discretization_name, 
                 processed_stack.append(processed_stream)
 
     # The processed_stack is now in order with the watershed outlet stream at the top of the stack
-    table_name = "parameters_streams_physical"
+    table_name = "parameters_streams"
     parameters_streams_table = os.path.join(workspace, table_name)
     parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
     fields = ["Sequence"]
@@ -621,13 +621,13 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
     # TODO: Replace function comments with docstring style comments
     # Calculate contributing areas by starting at the top of the watershed
     # and moving towards the outlet
-    # Iterate through parameters_streams_physical by sequence number
+    # Iterate through parameters_streams by sequence number
     # This results in the headwater areas being calculated first
     # so moving towards the outlet the upstream contributing areas
     # can be added
 
-    parameters_streams_physical_table_name = "parameters_streams_physical"
-    parameters_streams_table = os.path.join(workspace, parameters_streams_physical_table_name)
+    parameters_streams_table_name = "parameters_streams"
+    parameters_streams_table = os.path.join(workspace, parameters_streams_table_name)
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
     discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
     parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
@@ -639,8 +639,8 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
     arcpy.management.MakeTableView(parameters_streams_table, parameters_streams_table_view, expression)
     stream_count = int(arcpy.management.GetCount(parameters_streams_table_view).getOutput(0))
 
-    parameters_elements_physical_table_name = "parameters_elements_physical"
-    parameters_elements_table = os.path.join(workspace, parameters_elements_physical_table_name)
+    parameters_elements_table_name = "parameters_elements"
+    parameters_elements_table = os.path.join(workspace, parameters_elements_table_name)
     expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'". \
         format(delineation_name_field, delineation_name,
                discretization_name_field, discretization_name,
@@ -737,8 +737,8 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
 
 def calculate_stream_slope(workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
                            save_intermediate_outputs):
-    parameters_streams_physical_table_name = "parameters_streams_physical"
-    parameters_streams_table = os.path.join(workspace, parameters_streams_physical_table_name)
+    parameters_streams_table_name = "parameters_streams"
+    parameters_streams_table = os.path.join(workspace, parameters_streams_table_name)
     discretization_streams = "{}_streams".format(discretization_name)
     streams_feature_class = os.path.join(workspace, discretization_streams)
 
@@ -751,7 +751,7 @@ def calculate_stream_slope(workspace, delineation_name, discretization_name, par
                                                                       discretization_name,
                                                                       parameterization_name_field,
                                                                       parameterization_name)
-    parameters_streams_table_view = "{}_tableview".format(parameters_streams_physical_table_name)
+    parameters_streams_table_view = "{}_tableview".format(parameters_streams_table_name)
     arcpy.management.MakeTableView(parameters_streams_table, parameters_streams_table_view, expression)
 
     arcpy.management.AddFields(streams_feature_class, "UpstreamX FLOAT # # # #;UpstreamY FLOAT # # # #;"
@@ -768,8 +768,8 @@ def calculate_stream_slope(workspace, delineation_name, discretization_name, par
     arcpy.management.AddJoin(parameters_streams_table_view, "StreamID", streams_feature_class, "Stream_ID")
 
     # Calculate centroid
-    centroid_x_field = "{0}.{1}".format(parameters_streams_physical_table_name, "CentroidX")
-    centroid_y_field = "{0}.{1}".format(parameters_streams_physical_table_name, "CentroidY")
+    centroid_x_field = "{0}.{1}".format(parameters_streams_table_name, "CentroidX")
+    centroid_y_field = "{0}.{1}".format(parameters_streams_table_name, "CentroidY")
     streams_centroid_x_field = "{0}.{1}".format(discretization_streams, "CentroidX")
     streams_centroid_y_field = "{0}.{1}".format(discretization_streams, "CentroidY")
     calculate_expression = "{0} !{1}!;{2} !{3}!".format(centroid_x_field, streams_centroid_x_field,
@@ -815,12 +815,12 @@ def calculate_stream_slope(workspace, delineation_name, discretization_name, par
                              upstream_points_name, "KEEP_ALL", "NO_INDEX_JOIN_FIELDS")
 
     # Add Join
-    join_field = "{0}.{1}".format(parameters_streams_physical_table_name, "StreamID")
+    join_field = "{0}.{1}".format(parameters_streams_table_name, "StreamID")
     arcpy.management.AddJoin(parameters_streams_table_view, join_field, sample_downstream_name,
                              downstream_points_name, "KEEP_ALL", "NO_INDEX_JOIN_FIELDS")
     # Calculate Fields
-    upstream_field = "{0}.{1}".format(parameters_streams_physical_table_name, "UpstreamElevation")
-    downstream_field = "{0}.{1}".format(parameters_streams_physical_table_name, "DownstreamElevation")
+    upstream_field = "{0}.{1}".format(parameters_streams_table_name, "UpstreamElevation")
+    downstream_field = "{0}.{1}".format(parameters_streams_table_name, "DownstreamElevation")
     sample_upstream_field = "{0}.{1}_Band_1".format(sample_upstream_name, dem_name)
     sample_downstream_field = "{0}.{1}_Band_1".format(sample_downstream_name, dem_name)
     calculate_expression = "{0} !{1}!;{2} !{3}!".format(upstream_field, sample_upstream_field,
@@ -850,8 +850,8 @@ def calculate_stream_slope(workspace, delineation_name, discretization_name, par
 
 def calculate_stream_geometries(workspace, delineation_name, discretization_name, parameterization_name,
                                 hydraulic_geometry_relationship, agwa_directory, save_intermediate_outputs):
-    parameters_streams_physical_table_name = "parameters_streams_physical"
-    parameters_streams_table = os.path.join(workspace, parameters_streams_physical_table_name)
+    parameters_streams_table_name = "parameters_streams"
+    parameters_streams_table = os.path.join(workspace, parameters_streams_table_name)
 
     # Streams table view of input delineation, discretization, and parameterization
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
@@ -862,7 +862,7 @@ def calculate_stream_geometries(workspace, delineation_name, discretization_name
                                                                       discretization_name,
                                                                       parameterization_name_field,
                                                                       parameterization_name)
-    parameters_streams_table_view = "{}_tableview".format(parameters_streams_physical_table_name)
+    parameters_streams_table_view = "{}_tableview".format(parameters_streams_table_name)
     arcpy.management.MakeTableView(parameters_streams_table, parameters_streams_table_view, expression)
 
     # Acquire channel width and depth coefficients and exponents from the hydraulic geometry relationship table
