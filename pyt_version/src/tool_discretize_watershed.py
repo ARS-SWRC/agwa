@@ -38,7 +38,10 @@ class DiscretizeWatershed(object):
                             if db:
                                 meta_path = os.path.join(db, "metaDelineation")
                                 if arcpy.Exists(meta_path):
-                                    delineation_list.append(lyr.name)
+                                    with arcpy.da.SearchCursor(meta_path, ["DelineationName"]) as meta_cursor:
+                                        for row in meta_cursor:
+                                            if row[0] == os.path.split(lyr.dataSource)[1]:
+                                                delineation_list.append(lyr.name)
         param0.filter.list = delineation_list
 
         param1 = arcpy.Parameter(displayName="Model",
