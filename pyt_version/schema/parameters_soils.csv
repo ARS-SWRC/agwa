@@ -1,2 +1,2 @@
-DelineationName,DiscretizationName,ParameterizationName,SoilId,HorizonNumber,HorizonThickness,TotalHorizons,TotalThickness,Ksat,CV,G,Porosity,Rock,Distribution,SMax,Sand,Silt,Clay,Splash,Cohesion,Pave,BPressure,CreationDate,AGWAVersionAtCreation,AGWAGDBVersionAtCreation,Status
-text,text,text,1,1,1,1,1,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,6/29/2022,text,text,text
+DelineationName,DiscretizationName,ParameterizationName,SoilId,Ksat,CV,G,Porosity,Rock,Distribution,SMax,Sand,Silt,Clay,Splash,Cohesion,Pave,BPressure,CreationDate,AGWAVersionAtCreation,AGWAGDBVersionAtCreation,Status
+text,text,text,text,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,6/29/2022,text,text,text
