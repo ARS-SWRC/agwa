@@ -217,6 +217,10 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     weight_soils(workspace, delineation_name, discretization, parameterization_name, intersection_feature_class,
                  save_intermediate_outputs)
 
+    tweet("Setting default parameters for stream soils")
+    parameterize_stream_soils(workspace, delineation_name, discretization, parameterization_name,
+                              save_intermediate_outputs)
+
 
 def populate_parameters_land_cover(workspace, delineation_name, discretization_name, parameterization_name, land_cover,
                                    lookup_table, save_intermediate_outputs):
@@ -917,3 +921,73 @@ def weight_soils(workspace, delineation_name, discretization_name, parameterizat
 
     if not save_intermediate_outputs:
         arcpy.management.Delete(soils_intersection)
+
+
+def parameterize_stream_soils(workspace, delineation_name, discretization_name, parameterization_name,
+                              save_intermediate_outputs):
+    parameters_streams_table_name = "parameters_streams"
+    parameters_streams_table = os.path.join(workspace, parameters_streams_table_name)
+
+    parameters_streams_table_view = "{}_tableview".format(parameters_streams_table)
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                      discretization_name_field,
+                                                                      discretization_name,
+                                                                      parameterization_name_field,
+                                                                      parameterization_name)
+    arcpy.management.MakeTableView(parameters_streams_table, parameters_streams_table_view, expression)
+
+    woolhiser_field = "Woolhiser".format(parameters_streams_table_view)
+    woolhiser_value = "'Yes'"
+    manning_field = "Manning".format(parameters_streams_table_view)
+    manning_value = 0.035
+    imperviousness_field = "Imperviousness".format(parameters_streams_table_view)
+    imperviousness_value = 0
+    ksat_field = "Ksat".format(parameters_streams_table_view)
+    ksat_value = 26.0
+    cv_field = "CV".format(parameters_streams_table_view)
+    cv_value = 1.9
+    g_field = "G".format(parameters_streams_table_view)
+    g_value = 127.0
+    porosity_field = "Porosity".format(parameters_streams_table_view)
+    porosity_value = 0.453
+    rock_field = "Rock".format(parameters_streams_table_view)
+    rock_value = 0
+    distribution_field = "Distribution".format(parameters_streams_table_view)
+    distribution_value = 0.38
+    smax_field = "SMax".format(parameters_streams_table_view)
+    smax_value = 0.91
+    sand_field = "Sand".format(parameters_streams_table_view)
+    sand_value = 65
+    silt_field = "Silt".format(parameters_streams_table_view)
+    silt_value = 23
+    clay_field = "Clay".format(parameters_streams_table_view)
+    clay_value = 12
+    splash_field = "Splash".format(parameters_streams_table_view)
+    splash_value = 63
+    cohesion_field = "Cohesion".format(parameters_streams_table_view)
+    cohesion_value = 0.005
+    pave_field = "Pave".format(parameters_streams_table_view)
+    pave_value = 0
+    bpressure_field = "BPressure".format(parameters_streams_table_view)
+    bpressure_value = 30.2
+
+    arcpy.management.CalculateField(parameters_streams_table_view, woolhiser_field, woolhiser_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, manning_field, manning_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, imperviousness_field, imperviousness_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, ksat_field, ksat_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, cv_field, cv_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, g_field, g_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, porosity_field, porosity_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, rock_field, rock_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, distribution_field, distribution_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, smax_field, smax_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, sand_field, sand_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, silt_field, silt_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, clay_field, clay_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, splash_field, splash_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, cohesion_field, cohesion_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, pave_field, pave_value)
+    arcpy.management.CalculateField(parameters_streams_table_view, bpressure_field, bpressure_value)
