@@ -151,7 +151,7 @@ def feature_to_raster(in_feature, field, out_raster, dissolve_out=""):
     if dissolve_out != "":
         try:
             tweet("Executing the Dissolve tool ... ")
-            arcpy.management.Dissolve(in_feature, dissolve_out)
+            arcpy.management.Dissolve(in_feature, dissolve_out, field)
         except arcpy.ExecuteError:
             # Catch arcpy geoprocessing exceptions and print error messages
             tweet(f"Error Messages: \n{arcpy.GetMessages(2)}", True)
@@ -213,12 +213,13 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
 
     # Step 2: Check if the Burn Severity Map is a raster or feature class/shapefile
     # If the map is a feature class/shapefile, it must be converted to a raster.
+    # TODO: If burn_severity_field is numeric, need to validate the index of the severity classes
     burn_severity_raster = burn_severity_map
     burn_describe = arcpy.Describe(burn_severity_map)
     # dataType property helps identify feature classes and shapefiles
     if hasattr(burn_describe, "dataType"):
         burn_data_type = burn_describe.dataType
-        if burn_data_type == "FeatureClass" or burn_data_type == "ShapeFile":
+        if burn_data_type == "FeatureLayer" or burn_data_type == "FeatureClass" or burn_data_type == "ShapeFile":
             # Dissolve and convert the feature class to a raster for geoprocessing
             in_feature = burn_severity_map
             field = burn_severity_field
@@ -226,13 +227,13 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
             out_raster = f"{output_folder}\\{burn_describe.name[:-4]}_ras{_ras_ext}"
             # Call the function to dissolve and convert the feature to a raster
             feature_to_raster(in_feature, field, out_raster, dissolve_out)
+            burn_severity_raster = out_raster
 
     # Step 3: Execute the IsNull tool
     # The ISNull converts all NoData values in the burn map to 1 and all other values to 0
-    in_raster = out_raster
     try:
         tweet("Executing the IsNull tool ... ")
-        burn_severity_zero = sa.IsNull(in_raster)
+        burn_severity_zero = sa.IsNull(burn_severity_raster)
     except arcpy.ExecuteError():
         # Catch arcpy geoprocessing exceptions and print error messages
         tweet(f"IsNull tool error messages: \n{arcpy.GetMessages(2)}", True)

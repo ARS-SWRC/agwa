@@ -11,7 +11,7 @@ importlib.reload(agwa)
 class ModifyLandCover(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
-        self.label = "Step x - Modify Land Cover"
+        self.label = "Step X - Modify Land Cover"
         self.description = ""
         self.canRunInBackground = False
 
