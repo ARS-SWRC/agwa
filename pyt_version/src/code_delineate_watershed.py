@@ -51,8 +51,10 @@ def initialize_workspace(workspace, delineation_name, outlet_feature_set, outlet
     template = r"\schema\metaDelineation.csv"
     config_keyword = ""
     out_alias = ""
-    result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
-    metadata_delineation_table = result.getOutput(0)
+    metadata_delineation_table = os.path.join(out_path, out_name)
+    if not arcpy.Exists(metadata_delineation_table):
+        result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
+        metadata_delineation_table = result.getOutput(0)
 
     row = None
     outlet_x = None

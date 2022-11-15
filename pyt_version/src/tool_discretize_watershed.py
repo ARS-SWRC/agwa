@@ -2,6 +2,7 @@
 import arcpy
 import os
 import sys
+import pandas as pd
 sys.path.append(os.path.dirname(__file__))
 import code_discretize_watershed as agwa
 import importlib
@@ -167,6 +168,20 @@ class DiscretizeWatershed(object):
                     .format(discretization_name, valid_name)
                 parameters[5].setWarningMessage(msg)
                 parameters[5].value = valid_name
+
+        if parameters[0].value and parameters[5].value:
+            workspace_par = parameters[10].value
+            discretization_name = parameters[5].valueAsText
+
+            meta_discretization_table = os.path.join(workspace_par, "metaDiscretization")
+            if arcpy.Exists(meta_discretization_table):
+                df_discretization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table,
+                                                                            'DiscretizationName'))
+                df_filtered = df_discretization[df_discretization.DiscretizationName == discretization_name]
+                if len(df_filtered) != 0:
+                    msg = f"The selected geodatabase already has an AGWA discretization named {discretization_name}. " \
+                          f"Please enter a unique name for the discretization to be created."
+                    parameters[5].setErrorMessage(msg)
 
         return
 

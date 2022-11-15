@@ -65,16 +65,36 @@ def initialize_workspace(workspace, discretization, parameterization_name, land_
     creation_date = datetime.datetime.now().isoformat()
     agwa_version_at_creation = ""
     agwa_gdb_version_at_creation = ""
-    fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "LandCoverName", "LandCoverPath",
-              "LandCoverLookUpTableName", "LandCoverLookUpTablePath", "SoilsName", "SoilsPath", "SoilsDatabaseName",
-              "SoilsDatabasePath", "MaxHorizons", "MaxThickness", "CreationDate", "AGWAVersionAtCreation",
-              "AGWAGDBVersionAtCreation"]
+    fields = ["LandCoverName", "LandCoverPath", "LandCoverLookUpTableName", "LandCoverLookUpTablePath", "SoilsName",
+              "SoilsPath", "SoilsDatabaseName", "SoilsDatabasePath", "MaxHorizons", "MaxThickness", "CreationDate",
+              "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation"]
 
-    with arcpy.da.InsertCursor(meta_parameterization_table, fields) as cursor:
-        cursor.insertRow((delineation_name, discretization, parameterization_name, land_cover_name, land_cover_path,
-                          land_cover_look_up_table_name, land_cover_look_up_table_path, soils_name, soils_path,
-                          soils_database_name, soils_database_path, max_horizons, max_thickness, creation_date,
-                          agwa_version_at_creation, agwa_gdb_version_at_creation))
+    meta_parameterization_table_view = "{}_tableview".format(out_name)
+    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
+    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
+    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
+    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
+                                                                      discretization_name_field,
+                                                                      discretization,
+                                                                      parameterization_name_field,
+                                                                      parameterization_name)
+    arcpy.management.MakeTableView(meta_parameterization_table, meta_parameterization_table_view, expression)
+    with arcpy.da.UpdateCursor(meta_parameterization_table_view, fields) as cursor:
+        for row in cursor:
+            row[0] = land_cover_name
+            row[1] = land_cover_path
+            row[2] = land_cover_look_up_table_name
+            row[3] = land_cover_look_up_table_path
+            row[4] = soils_name
+            row[5] = soils_path
+            row[6] = soils_database_name
+            row[7] = soils_database_path
+            row[8] = max_horizons
+            row[9] = max_thickness
+            row[10] = creation_date
+            row[11] = agwa_version_at_creation
+            row[12] = agwa_gdb_version_at_creation
+            cursor.updateRow(row)
 
 
 def parameterize(workspace, discretization, parameterization_name, save_intermediate_outputs):
@@ -114,10 +134,8 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
     land_cover_name_field = arcpy.AddFieldDelimiters(workspace, "LandCoverName")
     expression = "{0} = '{1}'" \
-                 " AND {2} = '{3}'" \
-                 " AND {4} IS NOT NULL".format(discretization_name_field, discretization,
-                                               parameterization_name_field, parameterization_name,
-                                               land_cover_name_field)
+                 " AND {2} = '{3}'".format(discretization_name_field, discretization,
+                                           parameterization_name_field, parameterization_name)
 
     with arcpy.da.SearchCursor(meta_parameterization_table, fields, expression) as cursor:
         for row in cursor:
@@ -133,8 +151,10 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
             max_horizons = int(row[9])
             max_thickness = int(row[10])
         if row is None:
-            msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
-                meta_parameterization_table, "DelineationWorkspace", workspace)
+            msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}' and" \
+                  "field '{3}' equal to '{4}'.".format(
+                meta_parameterization_table, discretization_name_field, discretization,
+                parameterization_name_field, parameterization_name)
             print(msg)
             raise Exception(msg)
 
@@ -823,9 +843,6 @@ def weight_soils(workspace, delineation_name, discretization_name, parameterizat
     intersection_fields = ["SHAPE@AREA", ksat_field, cv_field, g_field, porosity_field, rock_field, distribution_field,
                            smax_field, sand_field, silt_field, clay_field, splash_field, cohesion_field, pave_field,
                            bpressure_field]
-
-    int_fields = [f.name for f in arcpy.ListFields(intersection_join)]
-    tweet(int_fields)
 
     with arcpy.da.UpdateCursor(parameters_elements_table_view, parameters_elements_fields) as elements_cursor:
         for element_row in elements_cursor:

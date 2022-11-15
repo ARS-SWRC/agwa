@@ -35,14 +35,14 @@ class SetupAgwaWorkspace(object):
                                  direction="Input")
         param1.filter.list = ['Local Database']
 
-        param2 = arcpy.Parameter(displayName="Filled DEM",
-                                 name="Filled_DEM",
+        param2 = arcpy.Parameter(displayName="DEM",
+                                 name="DEM",
                                  datatype="GPRasterLayer",
                                  parameterType="Required",
                                  direction="Input")
 
         param3 = arcpy.Parameter(displayName="Check if DEM is already filled.",
-                                 name="Check if DEM is already filled.",
+                                 name="Check_if_DEM_is_already_filled.",
                                  datatype="GPBoolean",
                                  parameterType="Required",
                                  direction="Input")
@@ -133,6 +133,15 @@ class SetupAgwaWorkspace(object):
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
+
+        # Ensure that the selected geodatabase has not already been set up as an AGWA workspace.
+        if parameters[1].value:
+            workspace_par = parameters[1].valueAsText
+            meta_workspace_table = os.path.join(workspace_par, "metaWorkspace")
+            if arcpy.Exists(meta_workspace_table):
+                msg = "The selected geodatabase has already been set up as a delineation workspace for AGWA. Please " \
+                      "select a different or create a new file geodatabase to use."
+                parameters[1].setErrorMessage(msg)
 
         # Ensure the input rasters are projected
         if parameters[2].value:

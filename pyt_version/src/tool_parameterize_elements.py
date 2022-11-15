@@ -2,6 +2,7 @@
 import arcpy
 import os
 import sys
+import pandas as pd
 sys.path.append(os.path.dirname(__file__))
 import code_parameterize_elements as agwa
 import importlib
@@ -195,6 +196,37 @@ class ParameterizeElements(object):
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
+        if parameters[0].value and parameters[5].value:
+            workspace_par = parameters[7].value
+            discretization_name = parameters[0].valueAsText
+            parameterization_name = parameters[5].valueAsText
+
+            meta_discretization_table = os.path.join(workspace_par, "metaDiscretization")
+            if arcpy.Exists(meta_discretization_table):
+                df_discretization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table,
+                                                                            ["DelineationName", "DiscretizationName"]))
+                df_discretization_filtered = \
+                    df_discretization[df_discretization.DiscretizationName == discretization_name]
+                delineation_name = df_discretization_filtered.DelineationName.values[0]
+
+                meta_parameterization_table = os.path.join(workspace_par, "metaParameterization")
+                if arcpy.Exists(meta_parameterization_table):
+                    fields = ["DelineationName", "DiscretizationName", "ParameterizationName"]
+                    df_parameterization = pd.DataFrame(arcpy.da.TableToNumPyArray(
+                        meta_parameterization_table, fields))
+                    df_parameterization_filtered = \
+                        df_parameterization[(df_parameterization.DelineationName == delineation_name)
+                                            & (df_parameterization.DiscretizationName == discretization_name)
+                                            & (df_parameterization.ParameterizationName == parameterization_name)]
+
+
+                    if len(df_parameterization_filtered) != 0:
+                        msg = fr"The selected geodatabase already has an AGWA parameterization named " \
+                              fr"{parameterization_name} for the {delineation_name}\{discretization_name} " \
+                              "delineation\discretization. Please enter a unique name for the parameterization to be" \
+                              " created."
+                        parameters[5].setErrorMessage(msg)
+
         return
 
     def execute(self, parameters, messages):

@@ -2,6 +2,7 @@
 import arcpy
 import os
 import sys
+import pandas as pd
 sys.path.append(os.path.dirname(__file__))
 import code_parameterize_land_cover_and_soils as agwa
 import importlib
@@ -146,12 +147,48 @@ class ParameterizeLandCoverAndSoils(object):
 
         parameters[7].value = workspace
 
+        # populate the available parameterizations
+        parameterization_list = []
+        if parameters[0].value and parameters[5].value:
+            discretization_name = parameters[0].valueAsText
+
+            meta_discretization_table = os.path.join(workspace, "metaDiscretization")
+            if arcpy.Exists(meta_discretization_table):
+                df_discretization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table,
+                                                                            ["DelineationName", "DiscretizationName"]))
+                df_discretization_filtered = \
+                    df_discretization[df_discretization.DiscretizationName == discretization_name]
+                delineation_name = df_discretization_filtered.DelineationName.values[0]
+
+                meta_parameterization_table = os.path.join(workspace, "metaParameterization")
+                if arcpy.Exists(meta_parameterization_table):
+                    fields = ["DelineationName", "DiscretizationName", "ParameterizationName"]
+                    df_parameterization = pd.DataFrame(arcpy.da.TableToNumPyArray(
+                        meta_parameterization_table, fields))
+                    df_parameterization_filtered = \
+                        df_parameterization[(df_parameterization.DelineationName == delineation_name)
+                                            & (df_parameterization.DiscretizationName == discretization_name)]
+
+                    parameterization_list = df_parameterization_filtered.ParameterizationName.values.tolist()
+
+                    if len(parameterization_list) == 0:
+                        msg = fr"Element parameterization must be performed prior to land cover and soils" \
+                              fr"parameterization, and the {delineation_name}\{discretization_name} " \
+                              fr"delineation\discretization does not have any element parameterizations complete." \
+                              fr"Please complete element parameterization before attemping land cover and " \
+                              fr"soils parameterization."
+                        parameters[5].setErrorMessage(msg)
+
+        parameters[5].filter.list = parameterization_list
+
         return
 
     # noinspection PyPep8Naming
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
+
+
         return
 
     def execute(self, parameters, messages):

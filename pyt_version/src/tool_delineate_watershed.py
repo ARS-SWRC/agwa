@@ -2,6 +2,7 @@
 import arcpy
 import os
 import sys
+import pandas as pd
 sys.path.append(os.path.dirname(__file__))
 import code_delineate_watershed as agwa
 import importlib
@@ -83,12 +84,31 @@ class DelineateWatershed(object):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
+        # TODO: SetError if a feature class containing multiple features with no selection
+        # TODO: SetError if a feature class containing multiple features with multiple selections
+        # selection = int(arcpy.GetCount_management(parameters[4].value).getOutput(0))
+        # if selection > 0:
+        #     parameters[4].setWarningMessage(f"The input has a selection. Records to be processed: '{selection}'")
         return
 
     # noinspection PyPep8Naming
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
+        # require a new delineation name for the workspace
+        if parameters[0].value and parameters[3].value:
+            workspace_par = parameters[0].valueAsText
+            delineation_name_par = parameters[3].valueAsText
+
+            meta_delineation_table = os.path.join(workspace_par, "metaDelineation")
+            if arcpy.Exists(meta_delineation_table):
+                df_delineation = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_delineation_table, 'DelineationName'))
+                df_filtered = df_delineation[df_delineation.DelineationName == delineation_name_par]
+                if len(df_filtered) != 0:
+                    msg = f"The selected geodatabase already has an AGWA delineation named {delineation_name_par}. " \
+                          f"Please enter a unique name for the delineation to be created."
+                    parameters[3].setErrorMessage(msg)
+
         return
 
     # noinspection PyPep8Naming
