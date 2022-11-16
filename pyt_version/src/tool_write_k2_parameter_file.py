@@ -2,6 +2,7 @@
 import arcpy
 import os
 import sys
+import pandas as pd
 sys.path.append(os.path.dirname(__file__))
 import code_write_k2_parameter_file as agwa
 import importlib
@@ -113,6 +114,40 @@ class WriteK2ParameterFile(object):
                                     workspace = ci.get("database")
 
         parameters[3].value = workspace
+
+        # populate the available parameterizations
+        parameterization_list = []
+        if parameters[0].value:
+            discretization_name = parameters[0].valueAsText
+
+            meta_discretization_table = os.path.join(workspace, "metaDiscretization")
+            if arcpy.Exists(meta_discretization_table):
+                df_discretization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table,
+                                                                            ["DelineationName", "DiscretizationName"]))
+                df_discretization_filtered = \
+                    df_discretization[df_discretization.DiscretizationName == discretization_name]
+                delineation_name = df_discretization_filtered.DelineationName.values[0]
+
+                meta_parameterization_table = os.path.join(workspace, "metaParameterization")
+                if arcpy.Exists(meta_parameterization_table):
+                    fields = ["DelineationName", "DiscretizationName", "ParameterizationName"]
+                    df_parameterization = pd.DataFrame(arcpy.da.TableToNumPyArray(
+                        meta_parameterization_table, fields))
+                    df_parameterization_filtered = \
+                        df_parameterization[(df_parameterization.DelineationName == delineation_name)
+                                            & (df_parameterization.DiscretizationName == discretization_name)]
+
+                    parameterization_list = df_parameterization_filtered.ParameterizationName.values.tolist()
+
+                    if len(parameterization_list) == 0:
+                        msg = fr"Element parameterization must be performed prior to land cover and soils" \
+                              fr"parameterization, and the {delineation_name}\{discretization_name} " \
+                              fr"delineation\discretization does not have any element parameterizations complete." \
+                              fr"Please complete element parameterization before attemping land cover and " \
+                              fr"soils parameterization."
+                        parameters[1].setErrorMessage(msg)
+
+        parameters[1].filter.list = parameterization_list
 
         return
 
