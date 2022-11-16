@@ -149,7 +149,7 @@ class ParameterizeLandCoverAndSoils(object):
 
         # populate the available parameterizations
         parameterization_list = []
-        if parameters[0].value and parameters[5].value:
+        if parameters[0].value:
             discretization_name = parameters[0].valueAsText
 
             meta_discretization_table = os.path.join(workspace, "metaDiscretization")
