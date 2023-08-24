@@ -1,2 +1,2 @@
-# agwa_temporary
-Temporary repository for commits of AGWA toolbox and code (ArcPy/Python) until branching strategy is established.
+# agwa-pro
+Repository for development of ArcGIS Pro version of AGWA toolbox and code (ArcPy/Python).
