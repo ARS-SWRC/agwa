@@ -213,19 +213,23 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
     if not arcpy.Exists(parameters_soil_textures_table):
         arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
 
-    delineation_raster = "{}_raster".format(delineation_name)
-    land_cover_clip = arcpy.sa.ExtractByMask(land_cover, delineation_raster)
-    if save_intermediate_outputs:
-        land_cover_name_only = os.path.splitext(land_cover_name)[0]
-        land_cover_clip_output = "{}_{}_ExtractByMask".format(delineation_name, land_cover_name_only)
-        land_cover_clip.save(land_cover_clip_output)
+    # Before using a land cover clipped to the delineation raster, need to resolve the issue that occurs if the
+    # land cover is clipped too aggressively and:
+    #   a) the Tabulate Area tool does not identify all of the plane elements in the discretization;
+    #   b) when adding the missed elements, the element centroid does not intersect the clipped land cover.
+    # delineation_raster = "{}_raster".format(delineation_name)
+    # land_cover_clip = arcpy.sa.ExtractByMask(land_cover, delineation_raster)
+    # if save_intermediate_outputs:
+    #     land_cover_name_only = os.path.splitext(land_cover_name)[0]
+    #     land_cover_clip_output = "{}_{}_ExtractByMask".format(delineation_name, land_cover_name_only)
+    #     land_cover_clip.save(land_cover_clip_output)
 
     tweet("Creating land cover parameters table")
-    populate_parameters_land_cover(workspace, delineation_name, discretization, parameterization_name, land_cover_clip,
+    populate_parameters_land_cover(workspace, delineation_name, discretization, parameterization_name, land_cover,
                                    lookup_table, save_intermediate_outputs)
 
     tweet("Tabulating land cover area")
-    tabulate_land_cover(workspace, delineation_name, discretization, parameterization_name, land_cover_clip,
+    tabulate_land_cover(workspace, delineation_name, discretization, parameterization_name, land_cover,
                         save_intermediate_outputs)
 
     tweet("Intersecting soils")
@@ -302,12 +306,103 @@ def tabulate_land_cover(workspace, delineation_name, discretization_name, parame
     discretization_feature_class = os.path.join(workspace, "{}_elements".format(discretization_name))
     land_cover_name = os.path.split(str(land_cover))[1]
     tabulate_area_table = "{0}_{1}_tabulate_area".format(discretization_name, land_cover_name)
-    arcpy.sa.TabulateArea(discretization_feature_class, "Element_ID",
+    element_id_field = "Element_ID"
+    arcpy.sa.TabulateArea(discretization_feature_class, element_id_field,
                           land_cover, "Value",
                           tabulate_area_table,
                           "",
                           "CLASSES_AS_FIELDS")
 
+    # Get the land cover values in the tabulate area table to check if any values are missing when the land cover of
+    # any missing elements is added
+    ta_fields = arcpy.ListFields(tabulate_area_table)
+
+    # If the count of records in the tabulate area table is not the same as the number of elements
+    # then the missing elements need to be added manually.
+    tabulate_area_count = int(arcpy.management.GetCount(tabulate_area_table).getOutput(0))
+    elements_count = int(arcpy.management.GetCount(parameters_elements_table_view).getOutput(0))
+    if tabulate_area_count < elements_count:
+        tweet("{0} zones found in the tabulate area table and {1} total plane elements in the discretization.".format(tabulate_area_count, elements_count))
+        # identify the elements missing from the tabulate area table
+        ta_elements = set(row[0] for row in arcpy.da.SearchCursor(tabulate_area_table, "Element_ID"))
+        discretization_elements = set(row[0] for row in arcpy.da.SearchCursor(parameters_elements_table_view, "ElementID"))
+        # tweet("tabulate area elements: {0}\ndiscretization elements: {1}".format(ta_elements, discretization_elements))
+        missing_elements = discretization_elements - ta_elements
+
+        # iterate over the missing elements to add their land cover to the tabulate area table
+        for element in missing_elements:
+            expression = "{0} = {1}".format(element_id_field, element)
+            with arcpy.da.SearchCursor(discretization_feature_class, ["SHAPE@XY", "SHAPE@AREA"], expression) as \
+                    elements_cursor:
+                for element_row in elements_cursor:
+                    element_centroid = element_row[0]
+                    element_area = element_row[1]
+                    # tweet("element centroid: {0}\nelement area: {1}".format(element_centroid, element_area))
+                    location_point = "{0} {1}".format(element_centroid[0], element_centroid[1])
+                    result = arcpy.management.GetCellValue(land_cover, location_point)
+                    # tweet(result.getMessages())
+                    cell_value = None
+                    if result.getOutput(0) != "NoData":
+                        cell_value = int(result.getOutput(0))
+                    missing_field = "VALUE_" + str(cell_value)
+                    tweet("Element ID {} was added to the tabulate area table because it was not identified by the"
+                          " Tabulate Area tool.".format(element))
+                    # Check to see if the tabulate area table has a field for the intersected value and if it does not,
+                    # add a new field for the intersected value
+                    field_exists = False
+
+                    for field in ta_fields:
+                        name = field.name
+                        if name == missing_field:
+                            field_exists = True
+                        # Set the default value for the value fields equal to 0
+                        # This works in ArcGIS Pro 3.1.1, but in ArcGIS Pro 3.0.0 even though
+                        # the fields correctly reflected a default value of 0, the inserted rows
+                        # had null values for the fields that were not explicitly set.
+                        # This may be related to the following bug, though the bug description doesn't completely agree
+                        # with the exhibited behavior.
+                        # https://support.esri.com/en-us/bug/when-using-the-data-access-module-with-the-updatecursor-bug-000091314
+                        # https://gis.stackexchange.com/questions/183932/insert-or-update-cursor-setting-value-to-none-not-honored-when-field-has-a-def
+                        if name.startswith("VALUE_"):
+                            arcpy.management.AssignDefaultToField(tabulate_area_table, name, 0)
+
+                    # value was not found in the tabulate area table, so add it
+                    if not field_exists:
+                        arcpy.management.AddField(
+                            in_table=tabulate_area_table,
+                            field_name=missing_field,
+                            field_type="DOUBLE",
+                            field_precision=None,
+                            field_scale=None,
+                            field_length=None,
+                            field_alias="",
+                            field_is_nullable="NULLABLE",
+                            field_is_required="NON_REQUIRED",
+                            field_domain=""
+                        )
+                        arcpy.management.CalculateField(
+                            in_table=tabulate_area_table,
+                            field=missing_field,
+                            expression="0",
+                            expression_type="PYTHON3",
+                            code_block="",
+                            field_type="TEXT",
+                            enforce_domains="NO_ENFORCE_DOMAINS"
+                        )
+                        # Set the default value to the new field equal to 0 in case other missing elements
+                        # have different missing values, which would result in this field being null in that row
+                        arcpy.management.AssignDefaultToField(tabulate_area_table, missing_field, 0)
+                        # Update the fields so a missing field is only added once
+                        ta_fields = arcpy.ListFields(tabulate_area_table)
+
+                    # Create a new row in the tabulate area table for the missing element
+                    insert_fields = ["Element_ID", missing_field]
+                    with arcpy.da.InsertCursor(tabulate_area_table, insert_fields) as ta_cursor:
+                        tweet("Inserting element ID: {0}".format(element))
+                        ta_cursor.insertRow((element, element_area))
+
+
+    tweet("Adding fields to tabulate area table.")
     # add TotalArea, Interception, Canopy, Manning, and Imperviousness fields to tabulate area table
     arcpy.management.AddFields(tabulate_area_table,
                                "TotalArea LONG # # # #;"
@@ -977,11 +1072,11 @@ def parameterize_stream_soils(workspace, delineation_name, discretization_name, 
     smax_field = "SMax".format(parameters_streams_table_view)
     smax_value = 0.91
     sand_field = "Sand".format(parameters_streams_table_view)
-    sand_value = 65
+    sand_value = 0.65
     silt_field = "Silt".format(parameters_streams_table_view)
-    silt_value = 23
+    silt_value = 0.23
     clay_field = "Clay".format(parameters_streams_table_view)
-    clay_value = 12
+    clay_value = 0.12
     splash_field = "Splash".format(parameters_streams_table_view)
     splash_value = 63
     cohesion_field = "Cohesion".format(parameters_streams_table_view)
