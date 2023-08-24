@@ -902,22 +902,26 @@ def calculate_stream_geometries(workspace, delineation_name, discretization_name
     upstream_bottom_width_field = arcpy.AddFieldDelimiters(workspace, "UpstreamBottomWidth")
     downstream_bottom_width_field = arcpy.AddFieldDelimiters(workspace, "DownstreamBottomWidth")
     # upstream bankfull depth calculation
-    expression = "{0} * math.pow(!UpstreamArea!, {1})".format(depth_coefficient, depth_exponent)
+    # expression = "{0} * math.pow(!UpstreamArea!, {1})".format(depth_coefficient, depth_exponent)
+    expression = "{0} * !UpstreamArea! ** {1}".format(depth_coefficient, depth_exponent)
     arcpy.management.CalculateField(parameters_streams_table_view, upstream_bankfull_depth_field,
                                     expression, "PYTHON3", '', "TEXT",
                                     "NO_ENFORCE_DOMAINS")
     # downstream bankfull depth calculation
-    expression = "{0} * math.pow(!UpstreamArea! + !LateralArea!, {1})".format(depth_coefficient, depth_exponent)
+    # expression = "{0} * math.pow(!UpstreamArea! + !LateralArea!, {1})".format(depth_coefficient, depth_exponent)
+    expression = "{0} * (!UpstreamArea! + !LateralArea!) * {1}".format(depth_coefficient, depth_exponent)
     arcpy.management.CalculateField(parameters_streams_table_view, downstream_bankfull_depth_field,
                                     expression, "PYTHON3", '', "TEXT",
                                     "NO_ENFORCE_DOMAINS")
     # upstream bankfull width calculation
-    expression = "{0} * math.pow(!UpstreamArea!, {1})".format(width_coefficient, width_exponent)
+    # expression = "{0} * math.pow(!UpstreamArea!, {1})".format(width_coefficient, width_exponent)
+    expression = "{0} * !UpstreamArea! ** {1}".format(width_coefficient, width_exponent)
     arcpy.management.CalculateField(parameters_streams_table_view, upstream_bankfull_width_field,
                                     expression, "PYTHON3", '', "TEXT",
                                     "NO_ENFORCE_DOMAINS")
     # downstream bankfull width calculation
-    expression = "{0} * math.pow(!UpstreamArea! + !LateralArea!, {1})".format(width_coefficient, width_exponent)
+    # expression = "{0} * math.pow(!UpstreamArea! + !LateralArea!, {1})".format(width_coefficient, width_exponent)
+    expression = "{0} * (!UpstreamArea! + !LateralArea!) ** {1}".format(width_coefficient, width_exponent)
     arcpy.management.CalculateField(parameters_streams_table_view, downstream_bankfull_width_field,
                                     expression, "PYTHON3", '', "TEXT",
                                     "NO_ENFORCE_DOMAINS")
