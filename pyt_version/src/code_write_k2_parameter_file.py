@@ -14,7 +14,7 @@ def tweet(msg):
     print(arcpy.GetMessages())
 
 
-def execute(workspace, discretization, parameterization, simulation_name):
+def execute(workspace, delineation, discretization, parameterization, simulation_name):
     cell_size = ""
     landcover = ""
     soil = ""
@@ -130,10 +130,10 @@ def execute(workspace, discretization, parameterization, simulation_name):
     # start writing parfile
     workspace_location = os.path.split(workspace)[0]
     # TODO: add delineation name to output path
-    output_path = fr'{workspace_location}\{discretization}\parameter_files'
+    output_path = os.path.join('{0}\{1}\{2}\parameter_files'.format(workspace_location, delineation, discretization))
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    output_file = fr'{output_path}\{simulation_name}.par'
+    output_file = os.path.join('{0}\{1}.par'.format(output_path, simulation_name))
     f = open(output_file, 'w')
 
     f.write(file_info)

@@ -58,8 +58,8 @@ class WriteK2ParameterFile(object):
                                  parameterType="Required",
                                  direction="Input")
 
-        param2 = arcpy.Parameter(displayName="Simulation Name",
-                                 name="Simulation_Name",
+        param2 = arcpy.Parameter(displayName="Parameter File Name",
+                                 name="Parameter_File_Name",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
@@ -163,10 +163,23 @@ class WriteK2ParameterFile(object):
         arcpy.AddMessage("Script source: " + __file__)
         discretization_par = parameters[0].valueAsText
         parameterization_name_par = parameters[1].valueAsText
-        simulation_name_par = parameters[2].valueAsText
+        parameter_file_name_par = parameters[2].valueAsText
         workspace_par = parameters[3].valueAsText
 
-        agwa.execute(workspace_par, discretization_par, parameterization_name_par, simulation_name_par)
+        # Obtain the delineation name from the metadata
+        meta_discretization_table = os.path.join(workspace_par, "metaDiscretization")
+        fields = ["DelineationName"]
+        row = None
+        expression = "{0} = '{1}'".format(arcpy.AddFieldDelimiters(workspace_par, "DiscretizationName"), discretization_par)
+        with arcpy.da.SearchCursor(meta_discretization_table, fields, expression) as cursor:
+            for row in cursor:
+                delineation_name = row[0]
+            if row is None:
+                msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
+                    meta_discretization_table, "DiscretizationName", discretization_par)
+                raise Exception(msg)
+
+        agwa.execute(workspace_par, delineation_name, discretization_par, parameterization_name_par, parameter_file_name_par)
         return
 
     # noinspection PyPep8Naming
