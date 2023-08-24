@@ -11,8 +11,9 @@ importlib.reload(agwa)
 class CreatePostfireLandCover(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
-        self.label = "Step X - Create Postfire Land Cover"
+        self.label = "Create Post-fire Land Cover"
         self.description = ""
+        self.category = "Land Cover Tools"
         self.canRunInBackground = False
 
     # noinspection PyPep8Naming
