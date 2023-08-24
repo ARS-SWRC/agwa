@@ -301,6 +301,7 @@ def assign_ids(discretization_feature_class, streams_feature_class, model):
     # Elements ending in 2 are laterals on the right
     # Elements ending in 3 are laterals on the left
     tweet("Assigning Element_ID to elements")
+    # TODO: Change Element_ID to ElementID
     element_id_field = "Element_ID"
     arcpy.management.AddField(discretization_feature_class, element_id_field, "LONG", None, None, None, '', "NULLABLE",
                               "NON_REQUIRED", '')

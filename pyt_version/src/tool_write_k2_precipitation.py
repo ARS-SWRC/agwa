@@ -51,6 +51,12 @@ class WriteK2Precipitation(object):
 
         param0.filter.list = discretization_list
 
+        # TODO: Add NOAA Atlas 14 web scraping as an option for creating precipitation file
+        # FAQ with NOAA's position on web scraping in question 2.5
+        # https://www.weather.gov/owp/hdsc_faqs
+        # Example web scraping request
+        # https://hdsc.nws.noaa.gov/cgi-bin/hdsc/new/cgi_readH5.py?lat=37.4000&lon=-119.2000&type=pf&data=depth&units=english&series=pds
+
         param1 = arcpy.Parameter(displayName="Depth (mm)",
                                  name="Depth",
                                  datatype="GPDouble",

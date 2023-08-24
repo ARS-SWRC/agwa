@@ -126,6 +126,7 @@ class DelineateWatershed(object):
 
         agwa.initialize_workspace(workspace_par, delineation_name_par, outlet_feature_set_par, snap_radius_par)
         agwa.delineate(workspace_par, delineation_name_par, save_intermediate_outputs_par)
+        messages.addGPMessages()
 
         return
 

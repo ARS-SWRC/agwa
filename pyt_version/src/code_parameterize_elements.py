@@ -61,6 +61,8 @@ def initialize_workspace(workspace, discretization, parameterization_name, slope
 
 
 def parameterize(workspace, discretization, parameterization_name, save_intermediate_outputs):
+    # TODO: delineation should be passed as a parameter instead of queried because
+    #  multiple delineations in the same workspace should be supported
     arcpy.env.workspace = workspace
 
     tweet("Reading workspace metadata")
@@ -136,6 +138,7 @@ def parameterize(workspace, discretization, parameterization_name, save_intermed
             print(msg)
             raise Exception(msg)
 
+    # TODO: Run arcpy.ValidateFieldName to make sure field names are valid for the workspace type
     # Create the parameterization look-up tables if they don't exist
     out_path = workspace
     out_name = "parameters_elements"
