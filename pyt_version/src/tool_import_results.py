@@ -117,6 +117,7 @@ class ImportResults(object):
         # populate the available simulations by identifying directories located in
         # \workspace\[delineation]\[discretization]\simulations\
         simulations_list = []
+        importable_list = []
         if parameters[0].value:
             discretization_name = parameters[0].valueAsText
 
@@ -133,7 +134,18 @@ class ImportResults(object):
                                                 "simulations", "*")
                 simulations_list = glob.glob(simulations_path)
 
-        parameters[1].filter.list = simulations_list
+                # loop through simulations_list to determine:
+                # 1) if simulation has been executed;
+                # 2) if executed, has simulation been imported;
+                # 3) if imported, has simulation been executed after the last import was performed;
+                for simulation in simulations_list:
+                    search_out = os.path.join(simulation, "*.out")
+                    out_files = glob.glob(search_out)
+                    count = len(out_files)
+                    if count == 1:
+                        importable_list.append(simulation)
+
+        parameters[1].filter.list = importable_list
 
         return
 
