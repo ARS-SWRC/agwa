@@ -50,11 +50,16 @@ class ImportResults(object):
 
         param0.filter.list = discretization_list
 
-        param1 = arcpy.Parameter(displayName="Simulation",
-                                 name="Simulation",
-                                 datatype="GPString",
+        param1 = arcpy.Parameter(displayName="Available Simulations",
+                                 name="Available_Simulations",
+                                 datatype="GPValueTable",
                                  parameterType="Required",
-                                 direction="Input")
+                                 direction="Input",
+                                 multiValue=True)
+        # param1.columns = [['GPString', 'Simulation', 'ReadOnly'], ['GPString', 'Status', 'ReadOnly']]
+        param1.columns = [['GPString', 'Simulation'], ['GPString', 'Status']]
+        param1.filters[0].type = 'ValueList'
+        param1.filters[1].type = 'ValueList'
 
         param2 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
@@ -137,7 +142,10 @@ class ImportResults(object):
                 # loop through simulations_list to determine:
                 # 1) if simulation has been executed;
                 # 2) if executed, has simulation been imported;
-                # 3) if imported, has simulation been executed after the last import was performed;
+                # 3) if imported,
+                #   a) has simulation been executed after the last import was performed;
+                #   b) has input parameter file been modified after simulation was last executed;
+
                 for simulation in simulations_list:
                     search_out = os.path.join(simulation, "*.out")
                     out_files = glob.glob(search_out)
@@ -145,7 +153,53 @@ class ImportResults(object):
                     if count == 1:
                         importable_list.append(simulation)
 
-        parameters[1].filter.list = importable_list
+        parameters[1].filters[0].list = importable_list
+
+        selection = parameters[1].value
+        updated_selection = []
+        # TODO: Add validation for handling multiple .out or .par files in the simulation directory
+        if selection:
+            for simulation, status in selection:
+                search_par = os.path.join(simulation, "*.par")
+                search_out = os.path.join(simulation, "*.out")
+                par_files = glob.glob(search_par)
+                out_files = glob.glob(search_out)
+                par_file = par_files[0]
+                out_file = out_files[0]
+
+                simulation_name = os.path.split(simulation)[1]
+                results_gdb = os.path.join(simulation, simulation_name + "_results.gdb")
+                time_par_file = os.path.getmtime(par_file)
+                time_out_file = os.path.getmtime(out_file)
+
+                status = ""
+                if time_par_file > time_out_file:
+                    status = ("!! The parameter file has been updated since the simulation was executed. Please "
+                              "execute the simulation to ensure the results reflect the current state of the "
+                              "parameter file. !!")
+                if not arcpy.Exists(results_gdb):
+                    if len(status) > 0:
+                        status += "\n"
+                    status += ("!! Results have not been imported for this simulation. Please import this simulation in "
+                               "order to view results. !!")
+                else:
+                    time_results_gdb = os.path.getmtime(results_gdb)
+                    parameters[4] = str(time_results_gdb)
+                    if time_out_file > time_results_gdb:
+                        if len(status) > 0:
+                            status += "\n"
+                        status += ("!! The results .out file has been updated since the simulation was imported. Please "
+                                   "import the simulation to ensure the results reflect the current state of the .out"
+                                   " file. !!")
+                    else:
+                        status = "The simulation has been imported and does not need to be imported again."
+                updated_selection.append([simulation, status])
+
+            parameters[1].value = updated_selection
+
+        # TODO: Add validation to prevent the same simulation from being selected multiple times
+        # TODO: Add message for simulations that have not been executed
+        # TODO: Add validation to ensure simulations that have been imported did so successfully.
 
         return
 
