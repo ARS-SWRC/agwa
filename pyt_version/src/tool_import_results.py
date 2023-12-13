@@ -5,6 +5,9 @@ import sys
 import pandas as pd
 import glob
 sys.path.append(os.path.dirname(__file__))
+import code_import_results as agwa
+import importlib
+importlib.reload(agwa)
 
 
 class ImportResults(object):
@@ -213,6 +216,27 @@ class ImportResults(object):
         """The source code of the tool."""
         # arcpy.AddMessage("Toolbox source: " + os.path.dirname(__file__))
         arcpy.AddMessage("Script source: " + __file__)
+        # param0, param1, param2, param3, param4, param5
+
+        discretization_par = parameters[0].valueAsText
+        # simulation_par = parameters[1].valueAsText
+        simulation_par = parameters[1].value
+        workspace_par = parameters[2].valueAsText
+        delineation_par = parameters[3].valueAsText
+        debug_par = parameters[4].valueAsText
+        save_intermediate_outputs_par = parameters[5].valueAsText
+
+        count = len(simulation_par)
+        count_msg = f"Number of simulations selected to import: {count}"
+        arcpy.AddMessage(count_msg)
+        for row in simulation_par:
+            sim_abspath = row[0]
+            sim_name = os.path.split(sim_abspath)[1]
+            sim_msg = row[1]
+            arcpy.AddMessage(f"Importing simulation '{sim_name}' ")
+            agwa.import_k2_results(workspace_par, delineation_par, discretization_par, sim_abspath)
+            arcpy.AddMessage("------------------------------------------------------------")
+
 
         return
 
