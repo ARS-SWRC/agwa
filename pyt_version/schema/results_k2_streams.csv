@@ -1,0 +1,2 @@
+DelineationName,DiscretizationName,ParameterizationName,ElementID,Element_Type,Element_Area_Metric,Cumulated_Area_Metric,Inflow_Metric,Rainfall_Metric,Outflow_Metric,Peak_Flow_Metric,Peak_Flow_Elapsed_Minutes,Peak_Sediment_Metric,Peak_Sediment_Elapsed_Time,Total_Infiltration_Metric,Initial_Water_Content,Sediment_Yield_Metric,CreationDate,AGWAVersionAtCreation,AGWAGDBVersionAtCreation,Status
+text,text,text,1,Channel,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,1.23,6/29/2022,text,text,text
