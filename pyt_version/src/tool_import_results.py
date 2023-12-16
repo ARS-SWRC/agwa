@@ -229,6 +229,7 @@ class ImportResults(object):
         count = len(simulation_par)
         count_msg = f"Number of simulations selected to import: {count}"
         arcpy.AddMessage(count_msg)
+        arcpy.AddMessage("------------------------------------------------------------")
         for row in simulation_par:
             sim_abspath = row[0]
             sim_name = os.path.split(sim_abspath)[1]
