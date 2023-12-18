@@ -5,6 +5,7 @@ import sys
 import pandas as pd
 import glob
 import shutil
+import datetime
 
 sys.path.append(os.path.dirname(__file__))
 
@@ -256,22 +257,62 @@ class WriteK2Simulation(object):
         shutil.copy2(k2_file, simulation_directory)
 
         # Create the run file for the simulation
-        parameter_file = os.path.split(parameter_file_par)[1]
-        precip_file = os.path.split(precipitation_file_par)[1]
-        output_file = parameter_file.split(".")[0] + ".out"
+        par_path, par_name = os.path.split(parameter_file_par)
+        precip_path, precip_name = os.path.split(precipitation_file_par)
+        output_file = f"{os.path.splitext(par_name)[0]}_{os.path.splitext(precip_name)[0]}.out"
+        if not simulation_description_par: simulation_description_par = ""
         courant = "y"
         sediment = "y"
         multipliers = "n"
         tabular_summary = "y"
-        runfile_body = "{0},{1},{2},{3},{4},{5},{6},{7},{8},{9}".format(parameter_file, precip_file, output_file,
-                                                                        simulation_description_par,
-                                                                        simulation_duration_par,
-                                                                        simulation_time_step_par, courant,
-                                                                        sediment, multipliers, tabular_summary)
+        runfile_body = (f"{par_name},{precip_name},{output_file},{simulation_description_par},"
+                        f"{simulation_duration_par},{simulation_time_step_par},{courant},{sediment},"
+                        f"{multipliers},{tabular_summary}")
         runfile_name = os.path.join(simulation_directory, "kin.fil")
         runfile_file = open(runfile_name, "w")
         runfile_file.write(runfile_body)
         runfile_file.close()
+
+        # Query the parameterization name used to create the selected parameter file
+        meta_parameterization_file_table = os.path.join(workspace_par, "metaParameterizationFile")
+        if not arcpy.Exists(meta_parameterization_file_table):
+            # Short-circuit and leave message
+            raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_parameterization_file_table))
+
+        fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "ParameterizationFileName"]
+        df_parameterization_file = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_parameterization_file_table, fields))
+        df_parameterization_file_filtered = \
+            df_parameterization_file[(df_parameterization_file.DelineationName == delineation_par) &
+                                     (df_parameterization_file.DiscretizationName == discretization_par) &
+                                     (df_parameterization_file.ParameterizationFileName == parameter_file_par)]
+        parameterization_name = df_parameterization_file_filtered.ParameterizationName.values[0]
+
+        # Add an entry to the metaSimulation table to save the input parameters
+        out_path = workspace_par
+        out_name = "metaSimulation"
+        template = r"\schema\metaSimulation.csv"
+        config_keyword = ""
+        out_alias = ""
+        meta_simulation_table = os.path.join(out_path, out_name)
+        if not arcpy.Exists(meta_simulation_table):
+            result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
+            meta_simulation_table = result.getOutput(0)
+
+        creation_date = datetime.datetime.now()
+        agwa_version_at_creation = ""
+        agwa_gdb_version_at_creation = ""
+        arcpy.AddMessage(f"Simulation '{simulation_name_par}' written.")
+        status = "Simulation written successfully."
+        fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "ParameterizationFileName",
+                  "PrecipitationFileName", "SimulationName", "SimulationDescription", "SimulationDuration",
+                  "SimulationTimeStep", "SimulationPath", "CreationDate", "AGWAVersionAtCreation",
+                  "AGWAGDBVersionAtCreation", "Status"]
+
+        with arcpy.da.InsertCursor(meta_simulation_table, fields) as cursor:
+            cursor.insertRow((delineation_par, discretization_par, parameterization_name, parameter_file_par,
+                              precipitation_file_par, simulation_name_par, simulation_description_par,
+                              int(simulation_duration_par), int(simulation_time_step_par), simulation_directory,
+                              creation_date, agwa_version_at_creation, agwa_gdb_version_at_creation, status))
 
         return
 

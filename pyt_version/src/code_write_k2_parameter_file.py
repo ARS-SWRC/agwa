@@ -13,12 +13,58 @@ def tweet(msg):
     print(m)
     print(arcpy.GetMessages())
 
+def initialize_workspace(workspace, delineation, discretization, parameterization, parameterization_file_name):
+    arcpy.env.workspace = workspace
 
-def execute(workspace, delineation, discretization, parameterization, simulation_name):
-    cell_size = ""
-    landcover = ""
-    soil = ""
-    agwa_version = ""
+    tweet("Reading delineation name from metadata")
+    meta_discretization_table = os.path.join(workspace, "metaDiscretization")
+    fields = ["DelineationName"]
+    row = None
+    expression = "{0} = '{1}'".format(arcpy.AddFieldDelimiters(workspace, "DiscretizationName"), discretization)
+    with arcpy.da.SearchCursor(meta_discretization_table, fields, expression) as cursor:
+        for row in cursor:
+            delineation_name = row[0]
+        if row is None:
+            msg = "Cannot proceed. \nThe table '{0}' returned 0 records with field '{1}' equal to '{2}'.".format(
+                meta_discretization_table, "DiscretizationName", discretization)
+            tweet(msg)
+            raise Exception(msg)
+
+    tweet("Writing parameterization file parameters to metadata")
+    out_path = workspace
+    out_name = "metaParameterizationFile"
+    template = r"\schema\metaParameterizationFile.csv"
+    config_keyword = ""
+    out_alias = ""
+    meta_parameterization_file_table = os.path.join(out_path, out_name)
+    if not arcpy.Exists(meta_parameterization_file_table):
+        result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
+        meta_parameterization_file_table = result.getOutput(0)
+
+    creation_date = datetime.now()
+    agwa_version_at_creation = ""
+    agwa_gdb_version_at_creation = ""
+    fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "ParameterizationFileName", "CreationDate",
+              "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation"]
+
+    with arcpy.da.InsertCursor(meta_parameterization_file_table, fields) as cursor:
+        cursor.insertRow((delineation, discretization, parameterization, parameterization_file_name, creation_date,
+                          agwa_version_at_creation, agwa_gdb_version_at_creation))
+
+# TODO: Create metaParameterFile table and record information used to create the parameter file
+def execute(workspace, delineation, discretization, parameterization, parameterization_file_name):
+    meta_parameterization_file_table = os.path.join(workspace, "metaParameterizationFile")
+    if not arcpy.Exists(meta_parameterization_file_table):
+        # Short-circuit and leave message
+        raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_parameterization_file_table))
+
+    fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "AGWAVersionAtCreation"]
+    df_parameterization_file = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_parameterization_file_table, fields))
+    df_parameterization_file_filtered = \
+        df_parameterization_file[(df_parameterization_file.DelineationName == delineation) &
+                                 (df_parameterization_file.DiscretizationName == discretization) &
+                                 (df_parameterization_file.ParameterizationName == parameterization)]
+    agwa_version_at_creation = df_parameterization_file_filtered.AGWAVersionAtCreation.values[0]
 
     def write_plane(plane_id, par_name, df_p):
 
@@ -107,16 +153,14 @@ def execute(workspace, delineation, discretization, parameterization, simulation
     count_streams = len(df_s_filtered)
     # comment lines
     file_info = ('! File Info\n'
-                 f'!  AGWA Version:              {agwa_version}\n'
+                 f'!  AGWA Version:              {agwa_version_at_creation}\n'
                  f'!  Simulation Creation Date:  {datetime.now():%Y-%m-%d %H:%M:%S}\n'
-                 f'!  Watershed:                 {discretization}\n'
+                 f'!  Delineation:               {delineation}\n'
+                 f'!  Discretization:            {discretization}\n'
+                 f'!  Parameterization           {parameterization}\n'
                  f'!  Total Watershed Area:      {watershed_area} square meters\n'
-                 '!  Contributing Source Area:  0 square meters\n'
-                 f'!  DEM Cell Size:             {cell_size}\n'
                  f'!  Number of Planes:          {count_planes}\n'
                  f'!  Number of Channels:        {count_streams}\n'
-                 f'!  LandCover:                 {landcover}\n'
-                 f'!  Soils:                     {soil}\n'
                  '! End of File Info\n\n')
 
     global_info = ('BEGIN GLOBAL\n'
@@ -133,7 +177,7 @@ def execute(workspace, delineation, discretization, parameterization, simulation
     output_path = os.path.join('{0}\{1}\{2}\parameter_files'.format(workspace_location, delineation, discretization))
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    output_file = os.path.join('{0}\{1}.par'.format(output_path, simulation_name))
+    output_file = os.path.join(output_path, parameterization_file_name)
     f = open(output_file, 'w')
 
     f.write(file_info)

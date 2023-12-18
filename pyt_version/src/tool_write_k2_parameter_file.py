@@ -179,7 +179,13 @@ class WriteK2ParameterFile(object):
                     meta_discretization_table, "DiscretizationName", discretization_par)
                 raise Exception(msg)
 
-        agwa.execute(workspace_par, delineation_name, discretization_par, parameterization_name_par, parameter_file_name_par)
+        workspace_location = os.path.split(workspace_par)[0]
+        output_path = os.path.join(workspace_location, delineation_name, discretization_par, "parameter_files")
+        parameter_file_name_abspath = os.path.join(output_path, f"{parameter_file_name_par}.par")
+        agwa.initialize_workspace(workspace_par, delineation_name, discretization_par, parameterization_name_par,
+                                  parameter_file_name_abspath)
+        agwa.execute(workspace_par, delineation_name, discretization_par, parameterization_name_par,
+                     parameter_file_name_abspath)
         return
 
     # noinspection PyPep8Naming
