@@ -219,12 +219,16 @@ class ImportResults(object):
         # param0, param1, param2, param3, param4, param5
 
         discretization_par = parameters[0].valueAsText
-        # simulation_par = parameters[1].valueAsText
+        # parameterization_name = parameters[1].valueAsText
         simulation_par = parameters[1].value
         workspace_par = parameters[2].valueAsText
         delineation_par = parameters[3].valueAsText
         debug_par = parameters[4].valueAsText
         save_intermediate_outputs_par = parameters[5].valueAsText
+
+        meta_simulation_table = os.path.join(workspace_par, "metaSimulation")
+        parameterization_name = None
+        simulation_name = None
 
         count = len(simulation_par)
         count_msg = f"Number of simulations selected to import: {count}"
@@ -232,10 +236,18 @@ class ImportResults(object):
         arcpy.AddMessage("------------------------------------------------------------")
         for row in simulation_par:
             sim_abspath = row[0]
-            sim_name = os.path.split(sim_abspath)[1]
+            if arcpy.Exists(meta_simulation_table):
+                df_simulation = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_simulation_table,
+                                                                        ["ParameterizationName", "SimulationName",
+                                                                         "SimulationPath"]))
+                df_simulation_filtered = df_simulation[df_simulation.SimulationPath == sim_abspath]
+                parameterization_name = df_simulation_filtered.ParameterizationName.values[0]
+                simulation_name = df_simulation_filtered.SimulationName.values[0]
+
+            arcpy.AddMessage(f"Importing simulation '{simulation_name}' ")
             sim_msg = row[1]
-            arcpy.AddMessage(f"Importing simulation '{sim_name}' ")
-            agwa.import_k2_results(workspace_par, delineation_par, discretization_par, sim_abspath)
+            agwa.import_k2_results(workspace_par, delineation_par, discretization_par, parameterization_name,
+                                   simulation_name, sim_abspath)
             arcpy.AddMessage("------------------------------------------------------------")
 
 

@@ -16,7 +16,8 @@ def tweet(msg):
     print(arcpy.GetMessages())
 
 
-def import_k2_results(workspace, delineation_name, discretization_name, simulation_abspath):
+def import_k2_results(workspace, delineation_name, discretization_name, parameterization_name, simulation_name,
+                      simulation_abspath):
     # Create results GDB if it doesn't exist
     sim_path, sim_name = os.path.split(simulation_abspath)
     results_gdb_name = f"{sim_name}_results.gdb"
@@ -27,14 +28,14 @@ def import_k2_results(workspace, delineation_name, discretization_name, simulati
         tweet(f"Results file geodatabase already exists: {results_gdb_name}")
 
     results_table = os.path.join(results_gdb_abspath, "results_k2")
-    results_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "Element_ID", "Element_Type",
-                      "Element_Area_Metric", "Cumulated_Area_Metric", "Inflow_Metric", "Rainfall_Metric",
-                      "Outflow_Metric", "Peak_Flow_Metric", "Peak_Flow_Elapsed_Time", "Peak_Sediment_Metric",
-                      "Peak_Sediment_Elapsed_Time", "Total_Infiltration_Metric", "Initial_Water_Content",
-                      "Sediment_Yield_Metric", "CreationDate", "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation",
-                      "Status"]
+    results_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "SimulationName", "Element_ID",
+                      "Element_Type", "Element_Area_Metric", "Cumulated_Area_Metric", "Inflow_Metric",
+                      "Rainfall_Metric", "Outflow_Metric", "Peak_Flow_Metric", "Peak_Flow_Elapsed_Time",
+                      "Peak_Sediment_Metric", "Peak_Sediment_Elapsed_Time", "Total_Infiltration_Metric",
+                      "Initial_Water_Content", "Sediment_Yield_Metric", "CreationDate", "AGWAVersionAtCreation",
+                      "AGWAGDBVersionAtCreation", "Status"]
 
-    creation_date = datetime.datetime.now().isoformat()
+    creation_date = datetime.datetime.now()
     agwa_version_at_creation = ""
     agwa_gdb_version_at_creation = ""
 
@@ -143,12 +144,8 @@ def import_k2_results(workspace, delineation_name, discretization_name, simulati
                                         #            AGWAVersionAtCreation, AGWAGDBVersionAtCreation, Status]
 
                                         status = "Import successful"
-                                        delineation = "delineation"
-                                        discretization = "discretization"
-                                        parameterization = "parameterization"
-                                        simulation = "simulation"
-                                        new_row = [delineation, discretization, parameterization,
-                                                   int(element_id), element_type, float(element_area),
+                                        new_row = (delineation_name, discretization_name, parameterization_name,
+                                                   simulation_name, int(element_id), element_type, float(element_area),
                                                    float(cumulated_area), float(inflow),
                                                    float(rainfall), float(outflow), float(peak_flow),
                                                    float(peak_flow_times[int(element_id)]),
@@ -156,14 +153,9 @@ def import_k2_results(workspace, delineation_name, discretization_name, simulati
                                                    float(peak_sediment_times[int(element_id)][1]),
                                                    float(total_infil), float(initial_water_content),
                                                    float(sediment_yield), creation_date, agwa_version_at_creation,
-                                                   agwa_gdb_version_at_creation, status]
+                                                   agwa_gdb_version_at_creation, status)
                                         # new_row = [int(element_id)]
-                                        if element_type == "Plane":
-                                            elements_cursor.insertRow(new_row)
-                                        elif element_type == "Channel":
-                                            elements_cursor.insertRow(new_row)
-                                        elif element_type == "Pond":
-                                            elements_cursor.insertRow(new_row)
+                                        elements_cursor.insertRow(new_row)
 
                     # TODO: replace out_name with simulation name
                     tweet(f"'{out_name}' simulation imported successfully!")
