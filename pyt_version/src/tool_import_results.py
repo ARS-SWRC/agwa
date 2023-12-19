@@ -9,6 +9,13 @@ import code_import_results as agwa
 import importlib
 importlib.reload(agwa)
 
+STATUS_CURRENT = "The simulation has been imported and does not need to be imported again."
+STATUS_NOT_IMPORTED = ("!! Results have not been imported for this simulation. Please import this simulation in order to"
+                   " view results. !!")
+STATUS_OUTFILE_NEW = ("!! The results .out file has been updated since the simulation was imported. Please import the "
+                      "simulation to ensure the results reflect the current state of the .out file. !!")
+STATUS_PARFILE_NEW = ("!! The parameter file has been updated since the simulation was executed. Please execute the"
+                      " simulation to ensure the results reflect the current state of the parameter file. !!")
 
 class ImportResults(object):
     def __init__(self):
@@ -60,9 +67,11 @@ class ImportResults(object):
                                  direction="Input",
                                  multiValue=True)
         # param1.columns = [['GPString', 'Simulation', 'ReadOnly'], ['GPString', 'Status', 'ReadOnly']]
-        param1.columns = [['GPString', 'Simulation'], ['GPString', 'Status']]
+        param1.columns = [['GPString', 'Simulation'], ['GPString', 'Status'],
+                          ['GPBoolean', 'Overwrite Existing Import?']]
         param1.filters[0].type = 'ValueList'
         param1.filters[1].type = 'ValueList'
+        param1.filters[2].type = 'ValueList'
 
         param2 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
@@ -162,7 +171,7 @@ class ImportResults(object):
         updated_selection = []
         # TODO: Add validation for handling multiple .out or .par files in the simulation directory
         if selection:
-            for simulation, status in selection:
+            for simulation, status, overwrite in selection:
                 search_par = os.path.join(simulation, "*.par")
                 search_out = os.path.join(simulation, "*.out")
                 par_files = glob.glob(search_par)
@@ -177,26 +186,21 @@ class ImportResults(object):
 
                 status = ""
                 if time_par_file > time_out_file:
-                    status = ("!! The parameter file has been updated since the simulation was executed. Please "
-                              "execute the simulation to ensure the results reflect the current state of the "
-                              "parameter file. !!")
+                    status = STATUS_PARFILE_NEW
                 if not arcpy.Exists(results_gdb):
                     if len(status) > 0:
                         status += "\n"
-                    status += ("!! Results have not been imported for this simulation. Please import this simulation in "
-                               "order to view results. !!")
+                    status += STATUS_NOT_IMPORTED
                 else:
                     time_results_gdb = os.path.getmtime(results_gdb)
                     parameters[4] = str(time_results_gdb)
                     if time_out_file > time_results_gdb:
                         if len(status) > 0:
                             status += "\n"
-                        status += ("!! The results .out file has been updated since the simulation was imported. Please "
-                                   "import the simulation to ensure the results reflect the current state of the .out"
-                                   " file. !!")
+                        status += STATUS_OUTFILE_NEW
                     else:
-                        status = "The simulation has been imported and does not need to be imported again."
-                updated_selection.append([simulation, status])
+                        status = STATUS_CURRENT
+                updated_selection.append([simulation, status, overwrite])
 
             parameters[1].value = updated_selection
 
@@ -244,12 +248,16 @@ class ImportResults(object):
                 parameterization_name = df_simulation_filtered.ParameterizationName.values[0]
                 simulation_name = df_simulation_filtered.SimulationName.values[0]
 
-            arcpy.AddMessage(f"Importing simulation '{simulation_name}' ")
             sim_msg = row[1]
-            agwa.import_k2_results(workspace_par, delineation_par, discretization_par, parameterization_name,
-                                   simulation_name, sim_abspath)
-            arcpy.AddMessage("------------------------------------------------------------")
-
+            overwrite = row[2]
+            if overwrite or (sim_msg == STATUS_NOT_IMPORTED):
+                arcpy.AddMessage(f"Importing simulation '{simulation_name}' ")
+                agwa.import_k2_results(workspace_par, delineation_par, discretization_par, parameterization_name,
+                                       simulation_name, sim_abspath)
+                arcpy.AddMessage("------------------------------------------------------------")
+            else:
+                arcpy.AddMessage(f"Skipping simulation '{simulation_name}' ")
+                arcpy.AddMessage("------------------------------------------------------------")
 
         return
 

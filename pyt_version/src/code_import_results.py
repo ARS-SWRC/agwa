@@ -28,8 +28,8 @@ def import_k2_results(workspace, delineation_name, discretization_name, paramete
         tweet(f"Results file geodatabase already exists: {results_gdb_name}")
 
     results_table = os.path.join(results_gdb_abspath, "results_k2")
-    results_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "SimulationName", "Element_ID",
-                      "Element_Type", "Element_Area_Metric", "Cumulated_Area_Metric", "Inflow_Metric",
+    results_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "SimulationName", "OutFileName",
+                      "Element_ID", "Element_Type", "Element_Area_Metric", "Cumulated_Area_Metric", "Inflow_Metric",
                       "Rainfall_Metric", "Outflow_Metric", "Peak_Flow_Metric", "Peak_Flow_Elapsed_Time",
                       "Peak_Sediment_Metric", "Peak_Sediment_Elapsed_Time", "Total_Infiltration_Metric",
                       "Initial_Water_Content", "Sediment_Yield_Metric", "CreationDate", "AGWAVersionAtCreation",
@@ -44,7 +44,7 @@ def import_k2_results(workspace, delineation_name, discretization_name, paramete
     pond_search =  "     Pond"
 
     # open kin.fil to get simulation inputs
-    # TODO: support batch simulations where each line in the runfile is a simulation
+    # TODO: Test batch simulations where each line in the runfile is a simulation
     runfile_abspath = os.path.join(simulation_abspath, "kin.fil")
     with open(runfile_abspath, "r") as runfile:
         for line in runfile:
@@ -53,8 +53,23 @@ def import_k2_results(workspace, delineation_name, discretization_name, paramete
 
             # open output file for reading
             outfile_abspath = os.path.join(simulation_abspath, out_name)
-            # TODO: validate file is complete and error free before proceeding?
 
+            # TODO: Benchmark deleting existing rows and inserting now ones versus updating existing rows for case when
+            #  when simulation results are being overwritten/updated.
+            result = arcpy.management.SelectLayerByAttribute(
+                in_layer_or_view=results_table,
+                selection_type="NEW_SELECTION",
+                where_clause=f"DelineationName = '{delineation_name}' "
+                             f"And DiscretizationName = '{discretization_name}' "
+                             f"And ParameterizationName = '{parameterization_name}' "
+                             f"And SimulationName = '{simulation_name}'"
+                             f" And OutFileName = '{out_name}'",
+                invert_where_clause=None
+            )
+            if int(result.getOutput(1)) > 0:
+                arcpy.management.DeleteRows(in_rows=result.getOutput(0))
+
+            # TODO: validate file is complete and error free before proceeding?
             with arcpy.da.InsertCursor(results_table, results_fields) as elements_cursor:
                 with open(outfile_abspath, "r") as outfile:
                     tweet(f"Out file opened: {out_name}")
@@ -145,8 +160,8 @@ def import_k2_results(workspace, delineation_name, discretization_name, paramete
 
                                         status = "Import successful"
                                         new_row = (delineation_name, discretization_name, parameterization_name,
-                                                   simulation_name, int(element_id), element_type, float(element_area),
-                                                   float(cumulated_area), float(inflow),
+                                                   simulation_name, out_name, int(element_id), element_type,
+                                                   float(element_area), float(cumulated_area), float(inflow),
                                                    float(rainfall), float(outflow), float(peak_flow),
                                                    float(peak_flow_times[int(element_id)]),
                                                    float(peak_sediment_times[int(element_id)][0]),
@@ -157,8 +172,7 @@ def import_k2_results(workspace, delineation_name, discretization_name, paramete
                                         # new_row = [int(element_id)]
                                         elements_cursor.insertRow(new_row)
 
-                    # TODO: replace out_name with simulation name
-                    tweet(f"'{out_name}' simulation imported successfully!")
+                    tweet(f"'{simulation_name}' simulation with '{out_name}' results file imported successfully!")
 
 
 
