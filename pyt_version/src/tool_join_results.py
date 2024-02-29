@@ -99,9 +99,15 @@ class JoinResults(object):
                                  datatype="GPBoolean",
                                  parameterType="Optional",
                                  direction="Input")
+
+        param8 = arcpy.Parameter(displayName="Joined Feature Layer",
+                                 name="Joined_Feature_Layer",
+                                 datatype="GPFeatureLayer",
+                                 parameterType="Derived",
+                                 direction="Output")
         param6.value = False
 
-        params = [param0, param1, param2, param3, param4, param5, param6, param7]
+        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8]
         return params
 
     # noinspection PyPep8Naming
@@ -242,8 +248,12 @@ class JoinResults(object):
         save_intermediate_outputs_par = parameters[7].valueAsText
 
         # Remove any existing simulation results that are joined. Allow joins of other tables to remain.
+        # TODO: An alternative to removing joins from the existing discretization layer is to create a new
+        # layer for displaying the simulation results. This would allow multiple simulation results to be joined
+        # in the map simulataneously.
         discretization_elements = f"{discretization_par}_elements"
         discretization_streams = f"{discretization_par}_streams"
+        remove_join_result1 = None
         if currently_joined_simulation_par:
             joined_db, joined_table, joined_simulation = currently_joined_simulation_par[0]
             arcpy.AddMessage(f"Elements layer: '{discretization_elements}'")
@@ -251,28 +261,41 @@ class JoinResults(object):
             arcpy.AddMessage(f"Database: '{joined_db}'")
             arcpy.AddMessage(f"Table: '{joined_table}'")
             arcpy.AddMessage(f"Simulation: '{joined_simulation}'")
-            result = arcpy.management.RemoveJoin(
+            remove_join_result1 = arcpy.management.RemoveJoin(
                 in_layer_or_view=discretization_elements,
                 join_name=joined_table
             )
-            arcpy.AddMessage(result.getAllMessages())
+            arcpy.AddMessage(remove_join_result1.getAllMessages())
             # arcpy.management.RemoveJoin(
             #     in_layer_or_view=discretization_streams,
             #     join_name=table
             # )
         simulation_name = os.path.split(simulation_to_join_par)[1]
         results_gdb = os.path.join(simulation_to_join_par, simulation_name + "_results.gdb")
-        arcpy.AddMessage(results_gdb)
         results_table = "results_k2"
-        arcpy.management.AddJoin(
-            in_layer_or_view=discretization_elements,
-            in_field="Element_ID",
-            join_table=os.path.join(results_gdb, results_table),
-            join_field="Element_ID",
-            join_type="KEEP_ALL",
-            index_join_fields="NO_INDEX_JOIN_FIELDS",
-            rebuild_index="NO_REBUILD_INDEX"
-        )
+        join_table_abspath = os.path.join(results_gdb, results_table)
+        arcpy.AddMessage(f"Join table: '{join_table_abspath}'")
+        if remove_join_result1:
+            discretization_elements = remove_join_result1
+        result = arcpy.management.AddJoin(
+                in_layer_or_view=discretization_elements,
+                in_field="Element_ID",
+                join_table=join_table_abspath,
+                join_field="Element_ID",
+                join_type="KEEP_ALL",
+                index_join_fields="NO_INDEX_JOIN_FIELDS",
+                rebuild_index="NO_REBUILD_INDEX"
+            )
+        # result = arcpy.management.AddJoin(
+        #     in_layer_or_view=discretization_streams,
+        #     in_field="Element_ID",
+        #     join_table=join_table_abspath,
+        #     join_field="Element_ID",
+        #     join_type="KEEP_ALL",
+        #     index_join_fields="NO_INDEX_JOIN_FIELDS",
+        #     rebuild_index="NO_REBUILD_INDEX"
+        # )
+        parameters[8].value = result
 
         return
 
