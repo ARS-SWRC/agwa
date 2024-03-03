@@ -41,7 +41,7 @@ def import_k2_results(workspace, delineation_name, discretization_name, paramete
 
     plane_search = "    Plane"
     channel_search = "  Channel"
-    pond_search =  "     Pond"
+    pond_search = "     Pond"
 
     # open kin.fil to get simulation inputs
     # TODO: Test batch simulations where each line in the runfile is a simulation
@@ -175,6 +175,79 @@ def import_k2_results(workspace, delineation_name, discretization_name, paramete
                     tweet(f"'{simulation_name}' simulation with '{out_name}' results file imported successfully!")
 
 
+def update_field_aliases(elements_results_table):
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Element_Area_Metric",
+        new_field_name="",
+        new_field_alias="Element Area (m^2)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Cumulated_Area_Metric",
+        new_field_name="",
+        new_field_alias="Cumulated Area (m^2)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Inflow_Metric",
+        new_field_name="",
+        new_field_alias="Inflow (m^3)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Rainfall_Metric",
+        new_field_name="",
+        new_field_alias="Rainfall (m^3)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Outflow_Metric",
+        new_field_name="",
+        new_field_alias="Outflow (m^3)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Peak_Flow_Metric",
+        new_field_name="",
+        new_field_alias="Peak Flow (mm/hr)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Peak_Flow_Elapsed_Time",
+        new_field_name="",
+        new_field_alias="Time to Peak Flow (minutes)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Peak_Sediment_Metric",
+        new_field_name="",
+        new_field_alias="Peak Sediment discharge (kg/s)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Peak_Sediment_Elapsed_Time",
+        new_field_name="",
+        new_field_alias="Time to Peak Sediment Discharge (minutes)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Total_Infiltration_Metric",
+        new_field_name="",
+        new_field_alias="Total Infiltration (m^3)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Initial_Water_Content",
+        new_field_name="",
+        new_field_alias="Initial Water Content (m^3/m^3)",
+    )
+    arcpy.management.AlterField(
+        in_table=elements_results_table,
+        field="Sediment_Yield_Metric",
+        new_field_name="",
+        new_field_alias="Sediment Yield (kg)",
+    )
 
 
 def create_results_gdb(results_gdb_name, simulation_abspath):
@@ -186,9 +259,11 @@ def create_results_gdb(results_gdb_name, simulation_abspath):
     )
     results_gdb_abspath = result.getOutput(0)
 
-    # TODO: Add aliases for fields
     # TODO: Add fields for English units and use attribute rules to calculate them
 
+    # TODO: Use lookup table to create results table instead of using a schema?
+    #  This could support setting the field name, field alias, and field type at the same time instead of using the
+    #  'Alter Field' tool to set the alias
     out_name = "results_k2"
     template = r"\schema\results_k2.csv"
     config_keyword = ""
@@ -197,4 +272,4 @@ def create_results_gdb(results_gdb_name, simulation_abspath):
     elements_results_table = result.getOutput(0)
     tweet(f"Created table: {elements_results_table}")
 
-
+    update_field_aliases(elements_results_table)
