@@ -76,38 +76,46 @@ class JoinResults(object):
                                  direction="Input")
         param3.filter.type = "ValueList"
 
-        param4 = arcpy.Parameter(displayName="Workspace",
+        param4 = arcpy.Parameter(displayName="Joined Discretization Elements Layer",
+                                 name="Joined_Discretization_Elements_Layer",
+                                 datatype="GPFeatureLayer",
+                                 parameterType="Derived",
+                                 direction="Output")
+
+        param5 = arcpy.Parameter(displayName="Joined Discretization Streams Layer",
+                                 name="Joined_Discretization_Streams_Layer",
+                                 datatype="GPFeatureLayer",
+                                 parameterType="Derived",
+                                 direction="Output")
+
+        param6 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")
 
-        param5 = arcpy.Parameter(displayName="Delineation Name",
+        param7 = arcpy.Parameter(displayName="Delineation Name",
                                  name="Delineation_Name",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")
 
-        param6 = arcpy.Parameter(displayName="Debug messages",
+        param8 = arcpy.Parameter(displayName="Debug messages",
                                  name="Debug",
                                  datatype="GPString",
                                  parameterType="Optional",
                                  direction="Input")
 
-        param7 = arcpy.Parameter(displayName="Save Intermediate Outputs",
+        param9 = arcpy.Parameter(displayName="Save Intermediate Outputs",
                                  name="Save_Intermediate_Outputs",
                                  datatype="GPBoolean",
                                  parameterType="Optional",
                                  direction="Input")
 
-        param8 = arcpy.Parameter(displayName="Joined Feature Layer",
-                                 name="Joined_Feature_Layer",
-                                 datatype="GPFeatureLayer",
-                                 parameterType="Derived",
-                                 direction="Output")
-        param6.value = False
 
-        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8]
+        param8.value = False
+
+        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9]
         return params
 
     # noinspection PyPep8Naming
@@ -149,9 +157,14 @@ class JoinResults(object):
                                     workspace = ci.get("database")
 
                                 # See if results are joined to this layer
+                                # A layer with a join will have the join field names appended to the joined table name
+                                # with a period separating them. Periods should otherwise be invalid character
+                                # names, so the presence of a period indicates a join is present.
+                                # This logic was developed prior to discovering that joins could be identified through
+                                # the layer's CONNECTIONPROPERTIES. Refactoring to use the CONNECTIONPROPERTIES is
+                                # likely more robust.
                                 elements_fields = arcpy.ListFields(lyr)
                                 last_field = elements_fields[-1]
-
                                 field_split = last_field.name.split(".")
                                 join_name = None
                                 if len(field_split) > 1:
@@ -163,19 +176,38 @@ class JoinResults(object):
                                         arr = arcpy.da.TableToNumPyArray(lyr, field_name, skip_nulls=True)
                                         # The simulation name can be taken from the first row in the table because
                                         # all the results in the table should have the simulation name since
-                                        # the results geodatabase should only contain results from one simulation
+                                        # a new/unique results geodatabase is created for each simulation in the
+                                        # simulation directory
                                         simulation = arr[0][0]
-                                        status = (f"**If a new simulation is joined, the following join will be removed"
-                                                  f".**\nAGWA simulation: '{simulation}'"
-                                                  f"\nJoined table: '{join_name}'"
-                                                  f"\nResults database: '{database}'.")
+                                        if status.startswith("**If a new simulation is joined, the following join"):
+                                            status += (f"\n\nInput layer: '{lyr}'"
+                                                      f"\nAGWA simulation: '{simulation}'"
+                                                      f"\nResults database: '{database}'"
+                                                      f"\nJoined table: '{join_name}'.")
+                                        else:
+                                            status = (f"**If a new simulation is joined, the following join will be "
+                                                      f"removed.**\n"
+                                                      f"\nInput layer: '{lyr}'"
+                                                      f"\nAGWA simulation: '{simulation}'"
+                                                      f"\nResults database: '{database}'"
+                                                      f"\nJoined table: '{join_name}'.")
                                         current_joins_list = [database, join_name, simulation]
                                     else:
                                         status = f"Joined table name is '{join_name}'."
-                                else:
-                                    status = ""
+                                # else:
+                                #     status = ""
                             elif dataset_name == discretization_streams:
+                                ci = cp.get("connection_info")
+                                if ci:
+                                    workspace = ci.get("database")
+
                                 # See if results are joined to this layer
+                                # A layer with a join will have the join field names appended to the joined table name
+                                # with a period separating them. Periods should otherwise be invalid character
+                                # names, so the presence of a period indicates a join is present.
+                                # This logic was developed prior to discovering that joins could be identified through
+                                # the layer's CONNECTIONPROPERTIES. Refactoring to use the CONNECTIONPROPERTIES is
+                                # likely more robust.
                                 streams_fields = arcpy.ListFields(lyr)
                                 last_field = streams_fields[-1]
                                 field_split = last_field.name.split(".")
@@ -184,16 +216,36 @@ class JoinResults(object):
                                     join_name = field_split[0]
                                 if join_name:
                                     if join_name == "results_k2":
-                                        status = f"Joined table name is '{join_name}'."
+                                        database = cp_top.get('destination').get('connection_info').get('database')
+                                        field_name = f"{join_name}.SimulationName"
+                                        arr = arcpy.da.TableToNumPyArray(lyr, field_name, skip_nulls=True)
+                                        # The simulation name can be taken from the first row in the table because
+                                        # all the results in the table should have the simulation name since
+                                        # a new/unique results geodatabase is created for each simulation in the
+                                        # simulation directory
+                                        simulation = arr[0][0]
+                                        if status.startswith("**If a new simulation is joined, the following join"):
+                                            status += (f"\n\nInput layer: '{lyr}'" 
+                                                       f"\nAGWA simulation: '{simulation}'"
+                                                       f"\nResults database: '{database}'"
+                                                       f"\nJoined table: '{join_name}'.")
+                                        else:
+                                            status = (f"**If a new simulation is joined, the following join will be"
+                                                      f" removed.**"
+                                                      f"\nInput layer: '{lyr}'"
+                                                      f"\nAGWA simulation: '{simulation}'"
+                                                      f"\nResults database: '{database}'"
+                                                      f"\nJoined table: '{join_name}'.")
+                                        current_joins_list = [database, join_name, simulation]
                                     else:
                                         status = f"Joined table name is '{join_name}'."
-                                else:
-                                    status = ""
+                                # else:
+                                #     status = ""
 
         parameters[1].value = status
         if current_joins_list:
             parameters[2].value = f"'{current_joins_list[0]}' '{current_joins_list[1]}' '{current_joins_list[2]}'"
-        parameters[4].value = workspace
+        parameters[6].value = workspace
         workspace_directory = os.path.split(workspace)[0]
 
         # populate the available simulations by identifying imported simulations
@@ -208,7 +260,7 @@ class JoinResults(object):
                 df_discretization_filtered = \
                     df_discretization[df_discretization.DiscretizationName == discretization_name]
                 delineation_name = df_discretization_filtered.DelineationName.values[0]
-                parameters[4].value = delineation_name
+                parameters[7].value = delineation_name
 
                 simulations_path = os.path.join(workspace_directory, delineation_name, discretization_name,
                                                 "simulations", "*")
@@ -242,10 +294,10 @@ class JoinResults(object):
         discretization_par = parameters[0].valueAsText
         currently_joined_simulation_par = parameters[2].value
         simulation_to_join_par = parameters[3].value
-        workspace_par = parameters[4].valueAsText
-        delineation_par = parameters[5].valueAsText
-        debug_par = parameters[6].valueAsText
-        save_intermediate_outputs_par = parameters[7].valueAsText
+        workspace_par = parameters[6].valueAsText
+        delineation_par = parameters[7].valueAsText
+        debug_par = parameters[8].valueAsText
+        save_intermediate_outputs_par = parameters[9].valueAsText
 
         # Remove any existing simulation results that are joined. Allow joins of other tables to remain.
         # TODO: An alternative to removing joins from the existing discretization layer is to create a new
@@ -258,18 +310,19 @@ class JoinResults(object):
             joined_db, joined_table, joined_simulation = currently_joined_simulation_par[0]
             arcpy.AddMessage(f"Elements layer: '{discretization_elements}'")
             arcpy.AddMessage(f"Streams layer: '{discretization_streams}'")
+            arcpy.AddMessage(f"Simulation: '{joined_simulation}'")
             arcpy.AddMessage(f"Database: '{joined_db}'")
             arcpy.AddMessage(f"Table: '{joined_table}'")
-            arcpy.AddMessage(f"Simulation: '{joined_simulation}'")
             remove_join_result1 = arcpy.management.RemoveJoin(
                 in_layer_or_view=discretization_elements,
                 join_name=joined_table
             )
             arcpy.AddMessage(remove_join_result1.getAllMessages())
-            # arcpy.management.RemoveJoin(
-            #     in_layer_or_view=discretization_streams,
-            #     join_name=table
-            # )
+            remove_join_result2 = arcpy.management.RemoveJoin(
+                in_layer_or_view=discretization_streams,
+                join_name=joined_table
+            )
+            arcpy.AddMessage(remove_join_result2.getAllMessages())
         simulation_name = os.path.split(simulation_to_join_par)[1]
         results_gdb = os.path.join(simulation_to_join_par, simulation_name + "_results.gdb")
         results_table = "results_k2"
@@ -277,7 +330,7 @@ class JoinResults(object):
         arcpy.AddMessage(f"Join table: '{join_table_abspath}'")
         if remove_join_result1:
             discretization_elements = remove_join_result1
-        result = arcpy.management.AddJoin(
+        elements_result = arcpy.management.AddJoin(
                 in_layer_or_view=discretization_elements,
                 in_field="Element_ID",
                 join_table=join_table_abspath,
@@ -286,16 +339,17 @@ class JoinResults(object):
                 index_join_fields="NO_INDEX_JOIN_FIELDS",
                 rebuild_index="NO_REBUILD_INDEX"
             )
-        # result = arcpy.management.AddJoin(
-        #     in_layer_or_view=discretization_streams,
-        #     in_field="Element_ID",
-        #     join_table=join_table_abspath,
-        #     join_field="Element_ID",
-        #     join_type="KEEP_ALL",
-        #     index_join_fields="NO_INDEX_JOIN_FIELDS",
-        #     rebuild_index="NO_REBUILD_INDEX"
-        # )
-        parameters[8].value = result
+        streams_result = arcpy.management.AddJoin(
+            in_layer_or_view=discretization_streams,
+            in_field="Stream_ID",
+            join_table=join_table_abspath,
+            join_field="Element_ID",
+            join_type="KEEP_ALL",
+            index_join_fields="NO_INDEX_JOIN_FIELDS",
+            rebuild_index="NO_REBUILD_INDEX"
+        )
+        parameters[4].value = elements_result
+        parameters[5].value = streams_result
 
         return
 
