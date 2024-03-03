@@ -66,7 +66,7 @@ class JoinResults(object):
                                  datatype="GPValueTable",
                                  parameterType="Derived",
                                  direction="Output")
-        param2.columns = [['GPString', 'Database'], ['GPString', 'Table'],
+        param2.columns = [['GPString', 'Layer'], ['GPString', 'Database'], ['GPString', 'Table'],
                           ['GPString', 'Simulation Name']]
 
         param3 = arcpy.Parameter(displayName="Simulation to Join",
@@ -180,18 +180,18 @@ class JoinResults(object):
                                         # simulation directory
                                         simulation = arr[0][0]
                                         if status.startswith("**If a new simulation is joined, the following join"):
-                                            status += (f"\n\nInput layer: '{lyr}'"
+                                            status += (f"\n\nInput layer: '{lyr.name}'"
                                                       f"\nAGWA simulation: '{simulation}'"
                                                       f"\nResults database: '{database}'"
                                                       f"\nJoined table: '{join_name}'.")
                                         else:
                                             status = (f"**If a new simulation is joined, the following join will be "
                                                       f"removed.**\n"
-                                                      f"\nInput layer: '{lyr}'"
+                                                      f"\nInput layer: '{lyr.name}'"
                                                       f"\nAGWA simulation: '{simulation}'"
                                                       f"\nResults database: '{database}'"
                                                       f"\nJoined table: '{join_name}'.")
-                                        current_joins_list = [database, join_name, simulation]
+                                        current_joins_list.append([lyr.name, database, join_name, simulation])
                                     else:
                                         status = f"Joined table name is '{join_name}'."
                                 # else:
@@ -225,18 +225,18 @@ class JoinResults(object):
                                         # simulation directory
                                         simulation = arr[0][0]
                                         if status.startswith("**If a new simulation is joined, the following join"):
-                                            status += (f"\n\nInput layer: '{lyr}'" 
+                                            status += (f"\n\nInput layer: '{lyr.name}'" 
                                                        f"\nAGWA simulation: '{simulation}'"
                                                        f"\nResults database: '{database}'"
                                                        f"\nJoined table: '{join_name}'.")
                                         else:
                                             status = (f"**If a new simulation is joined, the following join will be"
                                                       f" removed.**"
-                                                      f"\nInput layer: '{lyr}'"
+                                                      f"\nInput layer: '{lyr.name}'"
                                                       f"\nAGWA simulation: '{simulation}'"
                                                       f"\nResults database: '{database}'"
                                                       f"\nJoined table: '{join_name}'.")
-                                        current_joins_list = [database, join_name, simulation]
+                                        current_joins_list.append([lyr.name, database, join_name, simulation])
                                     else:
                                         status = f"Joined table name is '{join_name}'."
                                 # else:
@@ -244,7 +244,7 @@ class JoinResults(object):
 
         parameters[1].value = status
         if current_joins_list:
-            parameters[2].value = f"'{current_joins_list[0]}' '{current_joins_list[1]}' '{current_joins_list[2]}'"
+            parameters[2].values = current_joins_list
         parameters[6].value = workspace
         workspace_directory = os.path.split(workspace)[0]
 
@@ -305,31 +305,29 @@ class JoinResults(object):
         # in the map simulataneously.
         discretization_elements = f"{discretization_par}_elements"
         discretization_streams = f"{discretization_par}_streams"
-        remove_join_result1 = None
         if currently_joined_simulation_par:
-            joined_db, joined_table, joined_simulation = currently_joined_simulation_par[0]
-            arcpy.AddMessage(f"Elements layer: '{discretization_elements}'")
-            arcpy.AddMessage(f"Streams layer: '{discretization_streams}'")
-            arcpy.AddMessage(f"Simulation: '{joined_simulation}'")
-            arcpy.AddMessage(f"Database: '{joined_db}'")
-            arcpy.AddMessage(f"Table: '{joined_table}'")
-            remove_join_result1 = arcpy.management.RemoveJoin(
-                in_layer_or_view=discretization_elements,
-                join_name=joined_table
-            )
-            arcpy.AddMessage(remove_join_result1.getAllMessages())
-            remove_join_result2 = arcpy.management.RemoveJoin(
-                in_layer_or_view=discretization_streams,
-                join_name=joined_table
-            )
-            arcpy.AddMessage(remove_join_result2.getAllMessages())
+            for row in currently_joined_simulation_par:
+                layer, joined_db, joined_table, joined_simulation = row
+                msg = f"Removing join:\n"\
+                      f"  Layer: '{layer}'\n"\
+                      f"  Simulation: '{joined_simulation}'\n"\
+                      f"  Database: '{joined_db}'\n"\
+                      f"  Table: '{joined_table}'\n\n"
+                arcpy.AddMessage(msg)
+                arcpy.management.RemoveJoin(
+                    in_layer_or_view=layer,
+                    join_name=joined_table
+                )
         simulation_name = os.path.split(simulation_to_join_par)[1]
         results_gdb = os.path.join(simulation_to_join_par, simulation_name + "_results.gdb")
         results_table = "results_k2"
         join_table_abspath = os.path.join(results_gdb, results_table)
-        arcpy.AddMessage(f"Join table: '{join_table_abspath}'")
-        if remove_join_result1:
-            discretization_elements = remove_join_result1
+        msg = f"Adding join:\n" \
+              f"  Layer: '{discretization_elements}'\n" \
+              f"  Simulation: '{simulation_name}'\n" \
+              f"  Database: '{results_gdb}'\n" \
+              f"  Table: '{results_table}'\n\n"
+        arcpy.AddMessage(msg)
         elements_result = arcpy.management.AddJoin(
                 in_layer_or_view=discretization_elements,
                 in_field="Element_ID",
@@ -339,6 +337,13 @@ class JoinResults(object):
                 index_join_fields="NO_INDEX_JOIN_FIELDS",
                 rebuild_index="NO_REBUILD_INDEX"
             )
+
+        msg = f"Adding join:\n" \
+              f"  Layer: '{discretization_streams}'\n" \
+              f"  Simulation: '{simulation_name}'\n" \
+              f"  Database: '{results_gdb}'\n" \
+              f"  Table: '{results_table}'\n\n"
+        arcpy.AddMessage(msg)
         streams_result = arcpy.management.AddJoin(
             in_layer_or_view=discretization_streams,
             in_field="Stream_ID",
