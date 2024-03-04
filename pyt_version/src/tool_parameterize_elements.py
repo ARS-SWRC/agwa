@@ -30,7 +30,11 @@ class ParameterizeElements(object):
         for lyr in m.listLayers():
             if lyr.isFeatureLayer:
                 if lyr.supports("CONNECTIONPROPERTIES"):
-                    cp = lyr.connectionProperties
+                    cp_top = lyr.connectionProperties
+                    # check if layer has a join, because the connection properties are nested below 'source' if so.
+                    cp = cp_top.get('source')
+                    if cp is None:
+                        cp = cp_top
                     wf = cp.get("workspace_factory")
                     if wf == "File Geodatabase":
                         ci = cp.get("connection_info")
@@ -142,7 +146,11 @@ class ParameterizeElements(object):
             for lyr in m.listLayers():
                 if lyr.isFeatureLayer:
                     if lyr.supports("CONNECTIONPROPERTIES"):
-                        cp = lyr.connectionProperties
+                        cp_top = lyr.connectionProperties
+                        # check if layer has a join, because the connection properties are nested below 'source' if so.
+                        cp = cp_top.get('source')
+                        if cp is None:
+                            cp = cp_top
                         wf = cp.get("workspace_factory")
                         if wf == "File Geodatabase":
                             dataset_name = cp["dataset"]
@@ -196,7 +204,7 @@ class ParameterizeElements(object):
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
-        if parameters[0].value and parameters[5].value:
+        if parameters[0].value and parameters[7].value:
             workspace_par = parameters[7].value
             discretization_name = parameters[0].valueAsText
             parameterization_name = parameters[5].valueAsText

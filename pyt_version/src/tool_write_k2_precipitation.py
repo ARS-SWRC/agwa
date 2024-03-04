@@ -29,7 +29,11 @@ class WriteK2Precipitation(object):
         for lyr in m.listLayers():
             if lyr.isFeatureLayer:
                 if lyr.supports("CONNECTIONPROPERTIES"):
-                    cp = lyr.connectionProperties
+                    cp_top = lyr.connectionProperties
+                    # check if layer has a join, because the connection properties are nested below 'source' if so.
+                    cp = cp_top.get('source')
+                    if cp is None:
+                        cp = cp_top
                     wf = cp.get("workspace_factory")
                     if wf == "File Geodatabase":
                         ci = cp.get("connection_info")
@@ -147,7 +151,11 @@ class WriteK2Precipitation(object):
             for lyr in m.listLayers():
                 if lyr.isFeatureLayer:
                     if lyr.supports("CONNECTIONPROPERTIES"):
-                        cp = lyr.connectionProperties
+                        cp_top = lyr.connectionProperties
+                        # check if layer has a join, because the connection properties are nested below 'source' if so.
+                        cp = cp_top.get('source')
+                        if cp is None:
+                            cp = cp_top
                         wf = cp.get("workspace_factory")
                         if wf == "File Geodatabase":
                             dataset_name = cp["dataset"]
