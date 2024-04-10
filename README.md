@@ -1,2 +1,2 @@
-# The Automated Geospatial Watershed Assessment tool (AGWA)
-Toolbox and code (ArcPy/Python) for the Automated Geospatial Watershed Assessment tool (AGWA).
+# agwa-pro
+Repository for development of ArcGIS Pro version of AGWA toolbox and code (ArcPy/Python).
