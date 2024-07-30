@@ -1,0 +1,6 @@
+# .gitignore content
+__pycache__/
+*.pyc
+*.log
+*.docx
+zrun.py
