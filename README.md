@@ -1,4 +1,7 @@
-<img src="agwa_logo\agwa_background.png" width="1200" alt="Logo">
+<p align="center">
+  <img src="https://www.tucson.ars.ag.gov/agwa/wp-content/uploads/2024/07/agwa_logo.png" alt="AGWA Steps" width="1250">
+</p>
+
 
 # The Automated Geospatial Watershed Assessment tool (AGWA)
 This repository contains the toolbox and code (ArcPy/Python) for the Automated Geospatial Watershed Assessment tool (AGWA).
@@ -11,6 +14,12 @@ The Automated Geospatial Watershed Assessment ([AGWA](https://www.tucson.ars.ag.
 AGWA was developed in the early 2000s through a collaborative effort involving the USDA-ARS Southwest Watershed Research Center, the U.S. EPA Office of Research and Development Landscape Ecology Branch, the University of Arizona, and the University of Wyoming. Earlier versions of AGWA were implemented in the ArcView and ArcMap environments, and these can be accessed [here](https://www.tucson.ars.ag.gov/agwa/downloads/).
 
 [KINEROS2](https://www.tucson.ars.ag.gov/kineros/) (KINematic runoff and EROSion) is an event oriented, physically-based model developed at the USDA-ARS to describe the processes of interception, infiltration, surface runoff, and erosion from small- to medium-sized watersheds. The Rangeland Hydrology and Erosion Model ([RHEM](https://dss.tucson.ars.ag.gov/rhem/)), a hillslope-scale model, has been integrated into KINEROS2. This integration makes RHEM available for simulations within the hillslope elements of KINEROS2, which allows for more detailed and accurate simulations of hydrology and erosion processes in rangeland environments.
+
+
+<p align="center">
+  <img src="https://www.tucson.ars.ag.gov/agwa/wp-content/uploads/2024/07/agwa_steps.gif" alt="AGWA Steps" width="300">
+</p>
+
 
 ### Core Capabilities
 - **Watershed Delineation, Discretization, and Parameterization**: AGWA Pro leverages publicly available global and regional datasets, along with user-provided data, to automate watershed delineations, discretization, and parameterization processes.
@@ -35,11 +44,11 @@ AGWA was developed in the early 2000s through a collaborative effort involving t
 ### Configuration
 - Open ArcGIS Pro and navigate to the Catalog pane.
 - In the Catalog Pane, right-click on `Toolboxes` and select `Add Toolbox`.
-- In the popup window, select `Folders` under `Project`, navigate to `code/AGWA_pyt.pyt`, and click `OK`.
-- Once added, expand Toolboxes in the Catalog pane to view `AGWA_pyt.pyt`.
+- In the popup window, select `Folders` under `Project`, navigate to `code/AGWA.pyt`, and click `OK`.
+- Once added, expand Toolboxes in the Catalog pane to view `AGWA.pyt`.
       
 <p align="center">
-  <img src="agwa_logo\agwa_pro_screenshot.png" width="500" alt="agwa_pro_screenshot">
+  <img src="https://www.tucson.ars.ag.gov/agwa/wp-content/uploads/2024/07/agwapro_screenshot.png" width="400" alt="agwa_pro_screenshot">
 </p>
 
 ## Tutorials
