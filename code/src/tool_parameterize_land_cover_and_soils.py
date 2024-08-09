@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
-import arcpy
 import os
 import sys
-import pandas as pd
+import arcpy
+import importlib
 sys.path.append(os.path.dirname(__file__))
 import code_parameterize_land_cover_and_soils as agwa
-import importlib
 importlib.reload(agwa)
 
 
@@ -16,212 +14,358 @@ class ParameterizeLandCoverAndSoils(object):
         self.description = ""
         self.canRunInBackground = False
 
-    # noinspection PyPep8Naming
     def getParameterInfo(self):
         """Define parameter definitions"""
-        param0 = arcpy.Parameter(displayName="AGWA Discretization",
+
+        param0 = arcpy.Parameter(displayName="AGWA Delineation",
+                                 name="AGWA_Delineation",
+                                 datatype="GPString",
+                                 parameterType="Required",
+                                 direction="Input")
+        delineation_list = []
+        project = arcpy.mp.ArcGISProject("CURRENT")
+        m = project.activeMap
+        for table in m.listTables():
+            if table.name == "metaDelineation":
+                with arcpy.da.SearchCursor(table, "DelineationName") as cursor:
+                    for row in cursor:
+                        delineation_list.append(row[0])
+                break
+        param0.filter.list = delineation_list        
+
+
+        param1 = arcpy.Parameter(displayName="AGWA Discretization",
                                  name="AGWA_Discretization",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
-        discretization_list = []
-        project = arcpy.mp.ArcGISProject("CURRENT")
-        m = project.activeMap
-        for lyr in m.listLayers():
-            if lyr.isFeatureLayer:
-                if lyr.supports("CONNECTIONPROPERTIES"):
-                    cp_top = lyr.connectionProperties
-                    # check if layer has a join, because the connection properties are nested below 'source' if so.
-                    cp = cp_top.get('source')
-                    if cp is None:
-                        cp = cp_top
-                    wf = cp.get("workspace_factory")
-                    if wf == "File Geodatabase":
-                        ci = cp.get("connection_info")
-                        if ci:
-                            workspace = ci.get("database")
-                            if workspace:
-                                meta_discretization_table = os.path.join(workspace, "metaDiscretization")
-                                if arcpy.Exists(meta_discretization_table):
-                                    dataset_name = cp["dataset"]
-                                    discretization_name = dataset_name.replace("_elements", "")
-                                    fields = ["DiscretizationName"]
-                                    row = None
-                                    expression = "{0} = '{1}'".format(
-                                        arcpy.AddFieldDelimiters(workspace, "DiscretizationName"), discretization_name)
-                                    with arcpy.da.SearchCursor(meta_discretization_table, fields, expression) as cursor:
-                                        for row in cursor:
-                                            discretization_name = row[0]
-                                            discretization_list.append(discretization_name)
 
-        param0.filter.list = discretization_list
 
-        param1 = arcpy.Parameter(displayName="Land Cover Raster",
+        param2 = arcpy.Parameter(displayName="Use Previous Soil and Land Cover Parameterization",
+                                 name="Use_Previous_Soil_and_Land_Cover_Parameterization",
+                                 datatype="GPBoolean",
+                                 parameterType="Required",
+                                 direction="Input")
+        param2.value = False
+
+        param3 = arcpy.Parameter(displayName="Select Previous Soil and Land Cover Parameterization",
+                                 name="Previous_Soil_Land_Cover_Parameterization",
+                                 datatype="GPString",
+                                 parameterType="Optional",
+                                 direction="Input") 
+        param3.enabled = False
+
+        param4 = arcpy.Parameter(displayName="Land Cover Raster",
                                  name="Land_Cover_Raster",
                                  datatype="GPRasterLayer",
-                                 parameterType="Required",
+                                 parameterType="Optional",
                                  direction="Input")
 
-        param2 = arcpy.Parameter(displayName="Land Cover Lookup Table",
+        param5 = arcpy.Parameter(displayName="Land Cover Lookup Table",
                                  name="Land_Cover_Lookup_Table",
-                                 datatype="GPTableView",
-                                 parameterType="Required",
+                                 datatype="GPString",
+                                 parameterType="Optional",
                                  direction="Input")
+        param5.filter.list = ["mrlc1992_lut", "mrlc1992_lut_fire", "mrlc2001_lut",
+                              "mrlc2001_lut_fire", "nalc_lut"]
 
-        param3 = arcpy.Parameter(displayName="Soils Layer",
+        param6 = arcpy.Parameter(displayName="Soils Layer",
                                  name="Soils_Layer",
                                  datatype=["GPFeatureLayer", "GPRasterLayer"],
-                                 parameterType="Required",
+                                 parameterType="Optional",
                                  direction="Input")
-        # TODO: Add GPRasterLayer to datatype list for Soils Layer parameter
+        
+        param7 = arcpy.Parameter(displayName="Default Soils Database",
+                                 name="Use Soils Database",
+                                 datatype="GPBoolean",
+                                 parameterType="Optional",
+                                 direction="Input")
+        param7.value = True
 
-        param4 = arcpy.Parameter(displayName="Soils Database",
-                                 name="Soils Database",
+        param8 = arcpy.Parameter(displayName="Soil Database",
+                                 name="Soil_Database",
+                                 datatype="DEWorkspace",
+                                 parameterType="Optional",
+                                 direction="Input")   
+
+        param9 = arcpy.Parameter(displayName="Maximum Number of Soil Horizons",
+                                 name="Max_horizons",
+                                 datatype="GPLong",
+                                 parameterType="Optional",
+                                 direction="Input")
+        
+        param10 = arcpy.Parameter(displayName="Maximum Soil Depth (cm)",
+                                 name="Max_thickness",
+                                 datatype="GPDouble",
+                                 parameterType="Optional",
+                                 direction="Input")
+        
+        param11 = arcpy.Parameter(displayName="Channel Type",
+                                 name="Channel_Type",
                                  datatype="GPString",
-                                 parameterType="Required",
-                                 direction="Input")
+                                 parameterType="Optional",
+                                 direction="Input") 
 
-        param5 = arcpy.Parameter(displayName="Parameterization Name",
+        param12 = arcpy.Parameter(displayName="Parameterization Name",
                                  name="Parameterization_Name",
                                  datatype="GPString",
-                                 parameterType="Required",
+                                 parameterType="Optional",
                                  direction="Input")
 
-        param6 = arcpy.Parameter(displayName="Environment",
+        param13 = arcpy.Parameter(displayName="Environment",
                                  name="Environment",
                                  datatype="GpString",
-                                 parameterType="Required",
+                                 parameterType="Optional",
                                  direction="Input")
-        param6.filter.list = ["ArcGIS Pro", "ArcMap", "Geoprocessing Service"]
-        param6.value = param6.filter.list[0]
+        param13.filter.list = ["ArcGIS Pro", "ArcMap", "Geoprocessing Service"]
+        param13.value = param13.filter.list[0]
 
-        param7 = arcpy.Parameter(displayName="Workspace",
+        param14 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")
-
-        param8 = arcpy.Parameter(displayName="Debug messages",
-                                 name="Debug",
-                                 datatype="GPString",
-                                 parameterType="Optional",
+        
+        param15 = arcpy.Parameter(displayName="Project Geodatabase",
+                                 name="Project_Geodatabase",
+                                 datatype="DEWorkspace",
+                                 parameterType="Derived",
                                  direction="Input")
-        if len(discretization_list) == 0:
-            param8.value = "No discretizations found in map."
-        else:
-            param8.value = ""
 
-        param9 = arcpy.Parameter(displayName="Save Intermediate Outputs",
+        param16 = arcpy.Parameter(displayName="Save Intermediate Outputs",
                                  name="Save_Intermediate_Outputs",
                                  datatype="GPBoolean",
                                  parameterType="Optional",
                                  direction="Input")
-        param9.value = False
+        param16.value = False
 
-        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9]
+        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, 
+                  param11, param12, param13, param14, param15, param16]
+
         return params
 
-    # noinspection PyPep8Naming
+
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
         return True
+    
 
-    # noinspection PyPep8Naming
+    def get_previous_parameterization(self, prjgdb, delineation_name, discretization_name):
+        """Get previous element and soil cover parameterization"""
+
+        meta_parameterization_table = os.path.join(prjgdb, "metaParameterization")
+        pre_soil_cover_parameterization_list = []
+        pre_element_parameterization_list = []
+        if arcpy.Exists(meta_parameterization_table):
+            with arcpy.da.SearchCursor(meta_parameterization_table, 
+                                        ["DelineationName", "DiscretizationName", "ParameterizationName",
+                                         "SlopeType", "ChannelType"]) as cursor:
+                for row in cursor:
+                    if ((row[0] == delineation_name) and (row[1] == discretization_name) and (row[3] != "")):                            
+                        pre_element_parameterization_list.append(row[2])
+                    if ((row[0] == delineation_name) and (row[1] == discretization_name) and (row[4] !="")):                       
+                        pre_soil_cover_parameterization_list.append(row[2])                            
+        return pre_soil_cover_parameterization_list, pre_element_parameterization_list
+
+
     def updateParameters(self, parameters):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
-        agwa_directory = ""
-        discretization_name = parameters[0].value
-        workspace = ""
-        if discretization_name:
+
+        # Get workspace, project geodatabase, and discretization list
+        discretization_list = []
+        delineation_name, agwa_directory, workspace, prjgdb = "", "", "", ""
+        if parameters[0].value:
+            delineation_name = parameters[0].valueAsText
             project = arcpy.mp.ArcGISProject("CURRENT")
             m = project.activeMap
-            for lyr in m.listLayers():
-                if lyr.isFeatureLayer:
-                    if lyr.supports("CONNECTIONPROPERTIES"):
-                        cp_top = lyr.connectionProperties
-                        # check if layer has a join, because the connection properties are nested below 'source' if so.
-                        cp = cp_top.get('source')
-                        if cp is None:
-                            cp = cp_top
-                        wf = cp.get("workspace_factory")
-                        if wf == "File Geodatabase":
-                            dataset_name = cp["dataset"]
-                            if dataset_name == discretization_name + "_elements":
-                                ci = cp.get("connection_info")
-                                if ci:
-                                    workspace = ci.get("database")
 
-        parameters[7].value = workspace
+            for table in m.listTables():
+                if table.name == "metaDelineation":
+                    with arcpy.da.SearchCursor(table, ["DelineationName", "ProjectGeoDataBase", 
+                                                       "DelineationWorkspace"]) as cursor:
+                        for row in cursor:
+                            if row[0] == delineation_name:
+                                prjgdb = row[1]
+                                workspace = row[2]
+                    if prjgdb and workspace:
+                        break                                
+            
+            for table in m.listTables():                    
+                if table.name == "metaDiscretization":
+                    with arcpy.da.SearchCursor(table, ["DelineationName", "DiscretizationName"]) as cursor:
+                        for row in cursor:
+                            if row[0] == delineation_name:
+                                discretization_list.append(row[1])
+                    if len(discretization_list) > 0:
+                        break
+                                
+            for table in m.listTables():                    
+                if table.name == "metaWorkspace":
+                    with arcpy.da.SearchCursor(table, ["AGWADirectory", "ProjectGeoDataBase"]) as cursor:
+                        for row in cursor:
+                            if row[1] == prjgdb:
+                                agwa_directory = row[0]                                        
 
-        # populate the available parameterizations
-        parameterization_list = []
-        if parameters[0].value:
-            discretization_name = parameters[0].valueAsText
+        delineation_name = parameters[0].valueAsText        
+        parameters[14].value = workspace
+        parameters[15].value = prjgdb        
+        parameters[1].filter.list = discretization_list
+        discretization_name = parameters[1].valueAsText
+        pre_soil_cover_list, pre_element_list = self.get_previous_parameterization(prjgdb, delineation_name, discretization_name)
+        parameters[12].filter.list = pre_element_list
 
-            meta_discretization_table = os.path.join(workspace, "metaDiscretization")
-            if arcpy.Exists(meta_discretization_table):
-                df_discretization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table,
-                                                                            ["DelineationName", "DiscretizationName"]))
-                df_discretization_filtered = \
-                    df_discretization[df_discretization.DiscretizationName == discretization_name]
-                delineation_name = df_discretization_filtered.DelineationName.values[0]
+        # Use previous element parameterization
+        if parameters[2].altered:
+            use_previous = parameters[2].value
+            if use_previous:
+                parameters[3].enabled = True                
+                if len(pre_soil_cover_list) > 0:
+                    parameters[3].filter.list = pre_soil_cover_list
+                    for param in parameters[4:12]:
+                        if hasattr(param, 'enabled'):
+                            param.enabled = False
+                        else:
+                            arcpy.AddMessage(f"Parameter {param} does not have an 'enabled' attribute.")                            
+            else:
+                parameters[3].enabled = False
+                for param in parameters[4:]:
+                    if hasattr(param, 'enabled'):
+                        param.enabled = True
 
-                meta_parameterization_table = os.path.join(workspace, "metaParameterization")
-                if arcpy.Exists(meta_parameterization_table):
-                    fields = ["DelineationName", "DiscretizationName", "ParameterizationName"]
-                    df_parameterization = pd.DataFrame(arcpy.da.TableToNumPyArray(
-                        meta_parameterization_table, fields))
-                    df_parameterization_filtered = \
-                        df_parameterization[(df_parameterization.DelineationName == delineation_name)
-                                            & (df_parameterization.DiscretizationName == discretization_name)]
+        # Get Channel Types
+        channel_type_list = []
+        lookup_table = os.path.join(agwa_directory, "lookup_tables.gdb")
+        if arcpy.Exists(lookup_table):
+            channel_type_table = os.path.join(lookup_table, "channel_types")
+            with arcpy.da.SearchCursor(channel_type_table, "Channel_Type") as cursor:
+                for row in cursor:
+                    channel_type_list.append(row[0])
+            parameters[11].filter.list = channel_type_list
+        else:
+            arcpy.AddMessage(f"Channel type table not found at {lookup_table}.")
 
-                    parameterization_list = df_parameterization_filtered.ParameterizationName.values.tolist()
-
-                    if len(parameterization_list) == 0:
-                        msg = fr"Element parameterization must be performed prior to land cover and soils" \
-                              fr"parameterization, and the {delineation_name}\{discretization_name} " \
-                              fr"delineation\discretization does not have any element parameterizations complete." \
-                              fr"Please complete element parameterization before attemping land cover and " \
-                              fr"soils parameterization."
-                        parameters[5].setErrorMessage(msg)
-
-        parameters[5].filter.list = parameterization_list
+        # Use default soil database
+        use_default_soil_databse = parameters[7].value
+        if use_default_soil_databse:
+            parameters[8].enabled = False           
+        else:
+            parameters[8].enabled = True
+        if parameters[6].value and use_default_soil_databse:
+            soil_layer = arcpy.Describe(parameters[6].value).catalogPath
+            soil_database = os.path.split(soil_layer)[0]
+            parameters[8].value = soil_database
 
         return
 
-    # noinspection PyPep8Naming
+
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
+        
+        # Check if element parameterization has been performed
+        delineation_name = parameters[0].valueAsText
+        discretization_name = parameters[1].valueAsText
+        prjgdb = ""
+        project = arcpy.mp.ArcGISProject("CURRENT")
+        m = project.activeMap
+        for table in m.listTables():
+            if table.name == "metaDelineation":
+                with arcpy.da.SearchCursor(table, ["DelineationName", "ProjectGeoDataBase", 
+                                                    "DelineationWorkspace"]) as cursor:
+                    for row in cursor:
+                        if row[0] == delineation_name:
+                            prjgdb = row[1]
+                break
 
+        pre_soil_cover_list, pre_element_list = self.get_previous_parameterization(prjgdb, delineation_name, discretization_name)
+
+        if parameters[12].value:
+            parameterization_name = parameters[12].valueAsText
+            if parameterization_name in pre_soil_cover_list:
+                parameters[12].setWarningMessage(f"Parameterization name {parameterization_name} already exists. "
+                                                 f"Results will be overwritten.")
+
+        # Make sure that the user has performed element parameterization before land cover and soils parameterization
+        use_previous = parameters[2].value
+        if use_previous:
+            if len(pre_soil_cover_list) == 0:
+                msg = (f"No previous soil and land cover parameterizations found for the selected delineation and discretization.")
+                parameters[3].setErrorMessage(msg)
+        
+        # Make sure that selected parameterization name is not the same as the previous parameterization name
+        if use_previous:
+            previous_parameterization = parameters[3].valueAsText
+            parameterization_name = parameters[12].valueAsText
+            if (parameterization_name is not None) and (previous_parameterization == parameterization_name):
+                msg = (f"Previous parameterization and current parameterization names cannot be the same.")
+                parameters[12].setErrorMessage(msg)
+            
+        # Make sure that the user has performed element parameterization before land cover and soils parameterization    
+        if parameters[0].value and parameters[1].value and len(pre_element_list) == 0:
+            msg = (f"Element parameterization must be performed prior to land cover and soils" 
+                   f"parameterization for selected delineation and discretization.")
+            parameters[1].setErrorMessage(msg)
+        
+        if use_previous:
+            if parameters[0].value and parameters[1].value and parameters[12].value:
+                if parameterization_name not in pre_element_list:
+                    msg = (f"The name entered does not have any associated element parameters. "
+                        f"Element parameterization (Step 4) must be performed prior to this step.")                            
+                    parameters[12].setErrorMessage(msg)
+        
+        if parameters[0].value:
+            channel_type_list = parameters[11].filter.list
+            if len(channel_type_list) == 0:
+                parameters[0].setErrorMessage("Missing metaWorkspace table in this project content. Please add or run Step 1 to create.")
 
         return
+
 
     def execute(self, parameters, messages):
         """The source code of the tool."""
         # arcpy.AddMessage("Toolbox source: " + os.path.dirname(__file__))
         arcpy.AddMessage("Script source: " + __file__)
-        discretization_par = parameters[0].valueAsText
-        land_cover_par = parameters[1].valueAsText
-        lookup_table_par = parameters[2].valueAsText
-        soils_par = parameters[3].valueAsText
-        soils_database_par = parameters[4].valueAsText
-        max_horizons_par = 1
-        max_thickness_par = 4
-        parameterization_name_par = parameters[5].valueAsText
-        environment_par = parameters[6].valueAsText
-        workspace_par = parameters[7].valueAsText
-        save_intermediate_outputs_par = parameters[9].valueAsText.lower() == 'true'
+        delineation = parameters[0].valueAsText
+        discretization = parameters[1].valueAsText
+        use_previous_parameterization = (parameters[2].valueAsText or '').lower() == 'true'
+        previous_parameterization = None 
 
-        agwa.initialize_workspace(workspace_par, discretization_par, parameterization_name_par, land_cover_par,
-                                  lookup_table_par, soils_par, soils_database_par, max_horizons_par, max_thickness_par)
-        agwa.parameterize(workspace_par, discretization_par, parameterization_name_par, save_intermediate_outputs_par)
+        if use_previous_parameterization:
+            previous_parameterization = parameters[3].valueAsText
+            (land_cover, lookup_table, soils, soils_database, max_horizons, 
+             max_thickness, channel_type) = (f"same as {previous_parameterization}" for _ in range(7))
+        else:
+            land_cover_layer = parameters[4].valueAsText
+            desc = arcpy.Describe(land_cover_layer)
+            land_cover = desc.catalogPath
+            lookup_table = parameters[5].valueAsText
+            soils_layer = parameters[6].valueAsText
+            desc = arcpy.Describe(soils_layer)
+            soils = desc.catalogPath
+            soils_database = parameters[8].valueAsText
+            max_horizons = int(parameters[9].valueAsText)
+            max_thickness = float(parameters[10].valueAsText)
+            channel_type = parameters[11].valueAsText
+
+        parameterization_name = parameters[12].valueAsText
+        workspace = parameters[14].valueAsText
+        prjgdb = parameters[15].valueAsText
+        save_intermediate_outputs = (parameters[16].valueAsText or '').lower() == 'true'
+  
+        agwa.initialize_workspace(delineation, discretization, parameterization_name, prjgdb, land_cover, 
+                                  lookup_table, soils, soils_database, max_horizons, max_thickness, channel_type)
+        
+        if use_previous_parameterization: 
+            agwa.copy_parameterization(workspace, delineation, discretization, previous_parameterization,
+                                        parameterization_name)
+        else:
+            agwa.parameterize(prjgdb, workspace, delineation, discretization, parameterization_name, save_intermediate_outputs)
 
         return
 
-    # noinspection PyPep8Naming
+
     def postExecute(self, parameters):
         """This method takes place after outputs are processed and
         added to the display."""

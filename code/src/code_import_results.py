@@ -1,275 +1,234 @@
-import arcpy
-import arcpy.management
-import math
 import os
-from pathlib import Path
+import io
+import sys
+import arcpy
 import datetime
-
+import pandas as pd
+import arcpy.management
+sys.path.append(os.path.join(os.path.dirname(__file__)))
+from config import AGWA_VERSION, AGWAGDB_VERSION
 
 def tweet(msg):
-    """Produce a message for both arcpy and python
-    : msg - a text message
-    """
+    """Produce a message for both arcpy and python    """
     m = "\n{}\n".format(msg)
     arcpy.AddMessage(m)
-    print(m)
     print(arcpy.GetMessages())
 
 
-def import_k2_results(workspace, delineation_name, discretization_name, parameterization_name, simulation_name,
-                      simulation_abspath):
-    # Create results GDB if it doesn't exist
-    sim_path, sim_name = os.path.split(simulation_abspath)
-    results_gdb_name = f"{sim_name}_results.gdb"
-    results_gdb_abspath = os.path.join(simulation_abspath, results_gdb_name)
-    if not arcpy.Exists(results_gdb_abspath):
-        create_results_gdb(results_gdb_name, simulation_abspath)
-    else:
-        tweet(f"Results file geodatabase already exists: {results_gdb_name}")
+def import_k2_results(workspace, delineation_name, discretization_name, parameterization_name, simulation_name, simulation_abspath): 
+    
+    tweet(f"    Reading results for simulation '{simulation_name}'")
+    df_results = read_simulation_results(delineation_name, discretization_name, parameterization_name, simulation_name, simulation_abspath)
 
-    results_table = os.path.join(results_gdb_abspath, "results_k2")
-    results_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "SimulationName", "OutFileName",
-                      "Element_ID", "Element_Type", "Element_Area_Metric", "Cumulated_Area_Metric", "Inflow_Metric",
-                      "Rainfall_Metric", "Outflow_Metric", "Peak_Flow_Metric", "Peak_Flow_Elapsed_Time",
-                      "Peak_Sediment_Metric", "Peak_Sediment_Elapsed_Time", "Total_Infiltration_Metric",
-                      "Initial_Water_Content", "Sediment_Yield_Metric", "CreationDate", "AGWAVersionAtCreation",
-                      "AGWAGDBVersionAtCreation", "Status"]
+    tweet(f"    Creating table k2_results if it does not exist")
+    results_table = os.path.join(workspace, "k2_results")
+    if not arcpy.Exists(results_table):
+        arcpy.CreateTable_management(workspace, "k2_results")
+        for field in df_results.columns:
+            if df_results[field].dtype == "int64":
+                field_type = "LONG"
+            elif df_results[field].dtype == "float64":
+                field_type = "DOUBLE"
+            else:
+                field_type = "TEXT"
+            arcpy.AddField_management(results_table, field, field_type)
 
-    creation_date = datetime.datetime.now()
-    agwa_version_at_creation = ""
-    agwa_gdb_version_at_creation = ""
+    tweet(f"    Adding field aliases to table k2_results")
+    add_field_alias(workspace, "k2_results")
 
-    plane_search = "    Plane"
-    channel_search = "  Channel"
-    pond_search = "     Pond"
+    tweet("    Removing existing records for the simulation if they exist")
+    where_clause = (f"DelineationName = '{delineation_name}' AND DiscretizationName = '{discretization_name}' "
+                    f"AND ParameterizationName = '{parameterization_name}' AND SimulationName = '{simulation_name}'")
+    with arcpy.da.UpdateCursor(results_table, df_results.columns, where_clause) as cursor:
+        for row in cursor:
+            cursor.deleteRow()
+    
+    tweet(f"    Importing simulation {simulation_name} into table k2_results")    
+    with arcpy.da.InsertCursor(results_table, df_results.columns) as cursor:
+        for row in df_results.itertuples(index=False):
+            cursor.insertRow(row)
+    
+def add_field_alias(results_gdb_abspath, table_name):
+    """Add field aliases to the table k2_results, called by import_k2_results."""
+    field_aliases = {"DelineationName": "Delineation Name",
+                    "DiscretizationName": "Discretization Name",
+                    "ParameterizationName": "Parameterization Name",
+                    "SimulationName": "Simulation Name",
+                    "OutFileName": "Output File Name",
+                    "Element_ID": "Element ID",
+                    "Element_Type": "Element Type",
+                    "peak_flow_times": "Peak Flow Time (min)",
+                    "peak_sediment_times": "Peak Sediment Time (min)",
+                    "peak_sediment_discharge_kgs": "Peak Sediment Discharge (kg/s)",
+                    "Element_Area_m2": "Element Area (m2)",
+                    "Contributing_Area_m2": "Contributing Area (m2)",
+                    "Inflow_cum": "Inflow (cum)",
+                    "Rainfall_cum": "Rainfall (cum)",
+                    "Outflow_cum": "Outflow (cum)",
+                    "Peak_Flow_mmhr": "Peak Flow (mm/hr)",
+                    "Total_Infil_cum": "Total Infiltration (cum)",
+                    "Initial_Water_Content": "Initial Water Content",
+                    "Sediment_Yield_kg": "Sediment Yield (kg)",
+                    "Rainfall_mm": "Rainfall (mm)",
+                    "Outflow_mm": "Outflow (mm)",
+                    "Inflow_mm": "Inflow (mm)",
+                    "Total_Infil_mm": "Total Infiltration (mm)",
+                    "Sediment_Yield_kgha": "Sediment Yield (kg/ha)",
+                    "Contributing_Area_sqft": "Contributing Area (sqft)",
+                    "Element_Area_sqft": "Element Area (sqft)",
+                    "Inflow_cfs": "Inflow (cfs)",
+                    "Inflow_cft": "Inflow (cft)",
+                    "Inflow_inches": "Inflow (inches)",
+                    "Outflow_cft": "Outflow (cft)",
+                    "Outflow_inches": "Outflow (inches)",
+                    "Peak_Flow_cfs": "Peak Flow (cfs)",
+                    "Peak_Flow_inhr": "Peak Flow (in/hr)",
+                    "Peak_Sediment_Discharge_lbs_s": "Peak Sediment Discharge (lbs/s)",
+                    "Rainfall_inches": "Rainfall (inches)",
+                    "Sediment_Yield_pounds": "Sediment Yield (pounds)",
+                    "Sediment_Yield_pounds_acre": "Sediment Yield (pounds/acre)",
+                    "Sediment_Yield_tons": "Sediment Yield (tons)",
+                    "Sediment_Yield_tons_acre": "Sediment Yield (tons/acre)",
+                    "Total_Infil_inches": "Total Infiltration (inches)"}
 
-    # open kin.fil to get simulation inputs
-    # TODO: Test batch simulations where each line in the runfile is a simulation
+    for field, alias in field_aliases.items():
+        arcpy.AlterField_management(os.path.join(results_gdb_abspath, table_name), field, new_field_alias=alias)
+
+   
+def read_simulation_results(delineation_name, discretization_name, parameterization_name, simulation_name, simulation_abspath):
+    """Reads simulation results from the output file and returns a pandas DataFrame. Called by import_k2_results."""
+
     runfile_abspath = os.path.join(simulation_abspath, "kin.fil")
     with open(runfile_abspath, "r") as runfile:
-        for line in runfile:
-            (par_name, precip_name, out_name, sim_description, sim_duration, sim_time_step, courant, sediment,
-             multipliers, tabular_summary) = line.split(",")
-
-            # open output file for reading
+        for line in runfile:  # this is to handle Batch runs
+            out_name = line.split(",")[2].strip()
             outfile_abspath = os.path.join(simulation_abspath, out_name)
 
-            # TODO: Benchmark deleting existing rows and inserting now ones versus updating existing rows for case when
-            #  when simulation results are being overwritten/updated.
-            result = arcpy.management.SelectLayerByAttribute(
-                in_layer_or_view=results_table,
-                selection_type="NEW_SELECTION",
-                where_clause=f"DelineationName = '{delineation_name}' "
-                             f"And DiscretizationName = '{discretization_name}' "
-                             f"And ParameterizationName = '{parameterization_name}' "
-                             f"And SimulationName = '{simulation_name}'"
-                             f" And OutFileName = '{out_name}'",
-                invert_where_clause=None
-            )
-            if int(result.getOutput(1)) > 0:
-                arcpy.management.DeleteRows(in_rows=result.getOutput(0))
+            # Reading simulation results from {out_name}
+            df_block = read_element(outfile_abspath)
+            df_tabular = read_tabular_data(outfile_abspath)
+            df_metric = pd.merge(df_block, df_tabular, how="left", on=["Element_ID", "Element_Type"])
+            df_metric.loc[df_metric.Element_Type=="Hillslope", "Rainfall_mm"] = df_metric["Rainfall_cum"] / df_metric["Element_Area_m2"] * 1000
+            df_metric.loc[df_metric.Element_Type=="Hillslope", "Outflow_mm"] = df_metric["Outflow_cum"] / df_metric["Element_Area_m2"] * 1000
+            df_metric.loc[df_metric.Element_Type=="Hillslope", "Inflow_mm"] = df_metric["Inflow_cum"] / df_metric["Element_Area_m2"] * 1000
+            df_metric.loc[df_metric.Element_Type=="Hillslope", "Total_Infil_mm"] = df_metric["Total_Infil_cum"] / df_metric["Element_Area_m2"] * 1000
+            df_metric.loc[df_metric.Element_Type=="Hillslope", "Sediment_Yield_kgha"] = df_metric["Sediment_Yield_kg"] / (df_metric["Element_Area_m2"] / 10000)
+            df_metric.loc[df_metric.Element_Type=="Channel", "Rainfall_mm"] = 0.
+            df_metric.loc[df_metric.Element_Type=="Channel", "Outflow_mm"] = df_metric["Outflow_cum"] / df_metric["Contributing_Area_m2"] * 1000
+            df_metric.loc[df_metric.Element_Type=="Channel", "Inflow_mm"] = df_metric["Inflow_cum"] / df_metric["Contributing_Area_m2"] * 1000
+            df_metric.loc[df_metric.Element_Type=="Channel", "Total_Infil_mm"] = df_metric["Total_Infil_cum"] / df_metric["Contributing_Area_m2"] * 1000
+            df_metric.loc[df_metric.Element_Type=="Channel", "Sediment_Yield_kgha"] = df_metric["Sediment_Yield_kg"] / (df_metric["Contributing_Area_m2"] / 10000)
 
-            # TODO: validate file is complete and error free before proceeding?
-            with arcpy.da.InsertCursor(results_table, results_fields) as elements_cursor:
-                with open(outfile_abspath, "r") as outfile:
-                    tweet(f"Out file opened: {out_name}")
-                    # store peak flow time and peak sediment discharge time in a dictionary to query when inserting rows
-                    peak_flow_times = {}
-                    peak_sediment_times = {}
-                    for line in outfile:
-                        if " Plane Element     " in line:
-                            element_id = line.split()[-1]
-                            read_block = True
-                            while read_block:
-                                block_line = next(outfile, False)
-                                if not block_line:
-                                    read_block = False
-                                else:
-                                    if "Peak flow = " in block_line:
-                                        time = block_line.split()[-2]
-                                        peak_flow_times[int(element_id)] = time
-                                    elif "Peak sediment discharge = " in block_line:
-                                        peak_sediment_discharge = block_line.split()[-5]
-                                        units = block_line.split()[-4]
-                                        # TODO: confirm units are always kg/s, if not then conversion is necessary
-                                        # if units != "kg/s":
-                                        time = block_line.split()[-2]
-                                        peak_sediment_times[int(element_id)] = [peak_sediment_discharge, time]
-                                        read_block = False
-                        elif " Channel Elem.     " in line:
-                            stream_id = line.split()[-1]
-                            read_block = True
-                            while read_block:
-                                block_line = next(outfile, False)
-                                if not block_line:
-                                    read_block = False
-                                else:
-                                    if "Peak flow = " in block_line:
-                                        time = block_line.split()[-2]
-                                        peak_flow_times[int(stream_id)] = time
-                                    elif "Peak sediment discharge = " in block_line:
-                                        peak_sediment_discharge = block_line.split()[-5]
-                                        units = block_line.split()[-4]
-                                        # TODO: confirm units are always kg/s, if not then conversion is necessary
-                                        # if units != "kg/s":
-                                        time = block_line.split()[-2]
-                                        peak_sediment_times[int(stream_id)] = [peak_sediment_discharge, time]
-                                        read_block = False
-                        elif " Pond Element     " in line:
-                            pond_id = line.split()[-1]
-                            read_block = True
-                            while read_block:
-                                block_line = next(outfile, False)
-                                if not block_line:
-                                    read_block = False
-                                else:
-                                    if "Peak flow = " in block_line:
-                                        time = block_line.split()[-2]
-                                        peak_flow_times[int(pond_id)] = time
-                                    elif "Peak sediment discharge = " in block_line:
-                                        peak_sediment_discharge = block_line.split()[-5]
-                                        units = block_line.split()[-4]
-                                        # TODO: confirm units are always kg/s, if not then conversion is necessary
-                                        # if units != "kg/s":
-                                        time = block_line.split()[-2]
-                                        peak_sediment_times[int(pond_id)] = [peak_sediment_discharge, time]
-                                        read_block = False
-                        elif "Tabular Summary of Element Hydrologic Components" in line:
-                            # Increment the lines to the start of the tabular data
-                            for x in range(4):
-                                next(outfile)
-                            read_tabular = True
-                            while read_tabular:
-                                tabular_line = next(outfile, False)
-                                if not tabular_line:
-                                    read_tabular = False
-                                else:
-                                    tabular_search = any(x not in tabular_line for x in (plane_search, channel_search, pond_search))
-                                    if tabular_search:
-                                        next_line_list = tabular_line.split()
-                                        (element_id, element_type, element_area, cumulated_area, inflow, rainfall,
-                                         outflow, peak_flow, total_infil, initial_water_content,
-                                         sediment_yield) = next_line_list
-                                        # new_row = [DelineationName, DiscretizationName, ParameterizationName,
-                                        #            element_id, Element_Type, Element_Area_Metric, Cumulated_Area_Metric,
-                                        #            Inflow_Metric, Rainfall_Metric, Outflow_Metric, Peak_Flow_Metric,
-                                        #            Peak_Flow_Elapsed_Minutes, Peak_Sediment_Metric,
-                                        #            Peak_Sediment_Elapsed_Time, Total_Infiltration_Metric,
-                                        #            Initial_Water_Content, Sediment_Yield_Metric, CreationDate,
-                                        #            AGWAVersionAtCreation, AGWAGDBVersionAtCreation, Status]
+            
+            tweet(f"    Converting units")
+            df_metric_english = unit_conversion(df_metric)
+            df_metric_english = df_metric_english.reindex(sorted(df_metric_english.columns), axis=1)
 
-                                        status = "Import successful"
-                                        new_row = (delineation_name, discretization_name, parameterization_name,
-                                                   simulation_name, out_name, int(element_id), element_type,
-                                                   float(element_area), float(cumulated_area), float(inflow),
-                                                   float(rainfall), float(outflow), float(peak_flow),
-                                                   float(peak_flow_times[int(element_id)]),
-                                                   float(peak_sediment_times[int(element_id)][0]),
-                                                   float(peak_sediment_times[int(element_id)][1]),
-                                                   float(total_infil), float(initial_water_content),
-                                                   float(sediment_yield), creation_date, agwa_version_at_creation,
-                                                   agwa_gdb_version_at_creation, status)
-                                        # new_row = [int(element_id)]
-                                        elements_cursor.insertRow(new_row)
+            df_metric_english["CreationDate"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            df_metric_english["AGWAVersionAtCreation"] = AGWA_VERSION
+            df_metric_english["AGWAGDBVersionAtCreation"] = AGWAGDB_VERSION
+            df_metric_english["Status"] = "Complete"
+            df_metric_english.insert(0, "DelineationName", delineation_name)
+            df_metric_english.insert(1, "DiscretizationName", discretization_name)
+            df_metric_english.insert(2, "ParameterizationName", parameterization_name)
+            df_metric_english.insert(3, "SimulationName", simulation_name)
+            df_metric_english.insert(4, "OutFileName", out_name)
 
-                    tweet(f"'{simulation_name}' simulation with '{out_name}' results file imported successfully!")
+    return df_metric_english
 
 
-def update_field_aliases(elements_results_table):
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Element_Area_Metric",
-        new_field_name="",
-        new_field_alias="Element Area (m^2)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Cumulated_Area_Metric",
-        new_field_name="",
-        new_field_alias="Cumulated Area (m^2)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Inflow_Metric",
-        new_field_name="",
-        new_field_alias="Inflow (m^3)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Rainfall_Metric",
-        new_field_name="",
-        new_field_alias="Rainfall (m^3)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Outflow_Metric",
-        new_field_name="",
-        new_field_alias="Outflow (m^3)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Peak_Flow_Metric",
-        new_field_name="",
-        new_field_alias="Peak Flow (mm/hr)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Peak_Flow_Elapsed_Time",
-        new_field_name="",
-        new_field_alias="Time to Peak Flow (minutes)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Peak_Sediment_Metric",
-        new_field_name="",
-        new_field_alias="Peak Sediment discharge (kg/s)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Peak_Sediment_Elapsed_Time",
-        new_field_name="",
-        new_field_alias="Time to Peak Sediment Discharge (minutes)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Total_Infiltration_Metric",
-        new_field_name="",
-        new_field_alias="Total Infiltration (m^3)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Initial_Water_Content",
-        new_field_name="",
-        new_field_alias="Initial Water Content (m^3/m^3)",
-    )
-    arcpy.management.AlterField(
-        in_table=elements_results_table,
-        field="Sediment_Yield_Metric",
-        new_field_name="",
-        new_field_alias="Sediment Yield (kg)",
-    )
+def read_tabular_data(filename):
+    """Reads tabular data from the output file and returns a pandas DataFrame. Called by read_simulation_results."""
+    with open(filename) as f:
+        lines = f.readlines()    
+    start_index = 0
+    for i, line in enumerate(lines):
+        if "Tabular Summary of Element Hydrologic Components" in line:
+            start_index = i + 5 
+            break    
+    data = ''.join(lines[start_index:])
+    column_names = [
+        'Element_ID', 'Element_Type', 'Element_Area_m2', 'Contributing_Area_m2',
+        'Inflow_cum', 'Rainfall_cum', 'Outflow_cum',
+        'Peak_Flow_mmhr', 'Total_Infil_cum', 'Initial_Water_Content', 'Sediment_Yield_kg']    
+    df = pd.read_csv(io.StringIO(data), delim_whitespace=True, names=column_names)
+    df.loc[df.Element_Type=="Plane", "Element_Type"] = "Hillslope"
+    return df
 
 
-def create_results_gdb(results_gdb_name, simulation_abspath):
-    tweet(f"Creating results file geodatabase: {results_gdb_name}")
-    result = arcpy.management.CreateFileGDB(
-        out_folder_path=simulation_abspath,
-        out_name=results_gdb_name,
-        out_version="CURRENT"
+def read_element(outfile_abspath):
+    """Reads element data from the output file and returns a pandas DataFrame. Called by read_simulation_results."""
+    data = []
+    with open(outfile_abspath, "r") as outfile:
+        for i, line in enumerate(outfile):
+            # print(i, line)
+            if " Plane Element  " in line:
+                element_id = line.split()[-1]
+                element_type = "Hillslope"
+                read_block = True
+            elif " Channel Elem.   " in line:
+                element_id = line.split()[-1]
+                element_type = "Channel"
+                read_block = True
+            elif " Pond Element     " in line:
+                element_id = line.split()[-1]
+                element_type = "Pond"
+                read_block = True
+            else:
+                continue
+
+            while read_block:
+                block_line = next(outfile, False)
+                if not block_line:
+                    read_block = False
+                else:
+                    if "Peak flow = " in block_line:
+                        peak_flow_time = block_line.split()[-2]
+                    elif "Peak sediment discharge = " in block_line:
+                        peak_sediment_discharge_kgs = block_line.split()[-5]
+                        peak_sediment_time = block_line.split()[-2]
+                        read_block = False
+
+            # Append the row to the data list
+            data.append([int(element_id), element_type, float(peak_flow_time), float(peak_sediment_time), 
+                         float(peak_sediment_discharge_kgs)])
+
+    # Create a DataFrame from the data list
+    df = pd.DataFrame(data, columns=['Element_ID', "Element_Type", 'peak_flow_times', 'peak_sediment_times', 'peak_sediment_discharge_kgs'])
+
+    return df
+
+ 
+def unit_conversion(df_metric):
+    """Convert units from metric to English units. Called by read_simulation_results."""
+
+    # Conversion coefficients
+    square_meters_to_square_feet = 10.7639
+    cubic_meters_per_second_to_cubic_feet_per_second = 35.3147
+    millimeters_to_inches = 0.0393701
+    kilograms_to_pounds = 2.20462
+    ha_to_acre = 2.47105 
+    cubic_meters_to_cubic_feet = 35.3147
+
+    # Assigning new columns with converted units
+    df_metric_english = df_metric.assign(
+        Contributing_Area_sqft = df_metric.Contributing_Area_m2 * square_meters_to_square_feet,
+        Element_Area_sqft = df_metric.Element_Area_m2 * square_meters_to_square_feet,
+        Inflow_cfs = df_metric.Inflow_cum * cubic_meters_per_second_to_cubic_feet_per_second,
+        Inflow_cft = df_metric.Inflow_cum * cubic_meters_to_cubic_feet,
+        Inflow_inches = df_metric.Inflow_mm * millimeters_to_inches,
+        Outflow_cft = df_metric.Outflow_cum * cubic_meters_to_cubic_feet,
+        Outflow_inches = df_metric.Outflow_mm * millimeters_to_inches,
+        Peak_Flow_cfs = df_metric.Peak_Flow_mmhr * cubic_meters_per_second_to_cubic_feet_per_second,
+        Peak_Flow_inhr = df_metric.Peak_Flow_mmhr * millimeters_to_inches,
+        Peak_Sediment_Discharge_lbs_s = df_metric.peak_sediment_discharge_kgs * kilograms_to_pounds,
+        Rainfall_inches = df_metric.Rainfall_mm * millimeters_to_inches,
+        Sediment_Yield_pounds = df_metric.Sediment_Yield_kg * kilograms_to_pounds,
+        Sediment_Yield_pounds_acre = df_metric.Sediment_Yield_kgha * kilograms_to_pounds / ha_to_acre,
+        Sediment_Yield_tons = df_metric.Sediment_Yield_kg / 1000,
+        Sediment_Yield_tons_acre = df_metric.Sediment_Yield_kgha / 1000,
+        Total_Infil_inches = df_metric.Total_Infil_mm * millimeters_to_inches
     )
-    results_gdb_abspath = result.getOutput(0)
 
-    # TODO: Add fields for English units and use attribute rules to calculate them
+    return df_metric_english
 
-    # TODO: Use lookup table to create results table instead of using a schema?
-    #  This could support setting the field name, field alias, and field type at the same time instead of using the
-    #  'Alter Field' tool to set the alias
-    out_name = "results_k2"
-    template = r"\schema\results_k2.csv"
-    config_keyword = ""
-    out_alias = ""
-    result = arcpy.management.CreateTable(results_gdb_abspath, out_name, template, config_keyword, out_alias)
-    elements_results_table = result.getOutput(0)
-    tweet(f"Created table: {elements_results_table}")
-
-    update_field_aliases(elements_results_table)

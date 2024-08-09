@@ -1,13 +1,14 @@
-# -*- coding: utf-8 -*-
-import arcpy
 import os
+import re
 import sys
-import pandas as pd
 import glob
+import arcpy
 import shutil
 import datetime
-
+import pandas as pd
+from arcpy._mp import Table                  
 sys.path.append(os.path.dirname(__file__))
+from config import AGWA_VERSION, AGWAGDB_VERSION
 
 
 class WriteK2Simulation(object):
@@ -17,314 +18,313 @@ class WriteK2Simulation(object):
         self.description = ""
         self.canRunInBackground = False
 
-    # noinspection PyPep8Naming
     def getParameterInfo(self):
         """Define parameter definitions"""
-        param0 = arcpy.Parameter(displayName="AGWA Discretization",
+
+        param0 = arcpy.Parameter(displayName="AGWA Delineation",
+                                 name="AGWA_Delineation",
+                                 datatype="GPString",
+                                 parameterType="Required",
+                                 direction="Input")
+        delineation_list = []
+        project = arcpy.mp.ArcGISProject("CURRENT")
+        m = project.activeMap
+        for table in m.listTables():
+            if table.name == "metaDelineation":
+                with arcpy.da.SearchCursor(table, "DelineationName") as cursor:
+                    for row in cursor:
+                        delineation_list.append(row[0])
+                break
+        param0.filter.list = delineation_list
+
+        param1 = arcpy.Parameter(displayName="AGWA Discretization",
                                  name="AGWA_Discretization",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
-        discretization_list = []
-        project = arcpy.mp.ArcGISProject("CURRENT")
-        m = project.activeMap
-        for lyr in m.listLayers():
-            if lyr.isFeatureLayer:
-                if lyr.supports("CONNECTIONPROPERTIES"):
-                    cp_top = lyr.connectionProperties
-                    # check if layer has a join, because the connection properties are nested below 'source' if so.
-                    cp = cp_top.get('source')
-                    if cp is None:
-                        cp = cp_top
-                    wf = cp.get("workspace_factory")
-                    if wf == "File Geodatabase":
-                        ci = cp.get("connection_info")
-                        if ci:
-                            workspace = ci.get("database")
-                            if workspace:
-                                meta_discretization_table = os.path.join(workspace, "metaDiscretization")
-                                if arcpy.Exists(meta_discretization_table):
-                                    dataset_name = cp["dataset"]
-                                    discretization_name = dataset_name.replace("_elements", "")
-                                    fields = ["DiscretizationName"]
-                                    row = None
-                                    expression = "{0} = '{1}'".format(
-                                        arcpy.AddFieldDelimiters(workspace, "DiscretizationName"), discretization_name)
-                                    with arcpy.da.SearchCursor(meta_discretization_table, fields, expression) as cursor:
-                                        for row in cursor:
-                                            discretization_name = row[0]
-                                            discretization_list.append(discretization_name)
 
-        param0.filter.list = discretization_list
-
-        param1 = arcpy.Parameter(displayName="Parameter File",
+        param2 = arcpy.Parameter(displayName="Parameter File",
                                  name="Parameter_File",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
 
-        param2 = arcpy.Parameter(displayName="Precipitation File",
+        param3 = arcpy.Parameter(displayName="Precipitation File",
                                  name="Precipitation_File",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
 
-        param3 = arcpy.Parameter(displayName="Simulation Name",
+        param4 = arcpy.Parameter(displayName="Simulation Name",
                                  name="Simulation_Name",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
 
-        param4 = arcpy.Parameter(displayName="Simulation Description",
+        param5 = arcpy.Parameter(displayName="Simulation Description (optional)",
                                  name="Simulation_Description",
                                  datatype="GPString",
                                  parameterType="Optional",
                                  direction="Input")
 
-        param5 = arcpy.Parameter(displayName="Simulation Duration (min)",
+        param6 = arcpy.Parameter(displayName="Simulation Duration (min)",
                                  name="Simulation_Duration",
                                  datatype="GPLong",
                                  parameterType="Required",
                                  direction="Input")
 
-        param6 = arcpy.Parameter(displayName="Simulation Time Step (min)",
+        param7 = arcpy.Parameter(displayName="Simulation Time Step (min)",
                                  name="Simulation_Time_Step",
                                  datatype="GPLong",
                                  parameterType="Required",
                                  direction="Input")
-        param6.value = 1
+        param7.value = 1
 
-        param7 = arcpy.Parameter(displayName="Workspace",
-                                 name="Workspace",
+        param8 = arcpy.Parameter(displayName="Workspace",
+                                    name="Workspace",
+                                    datatype="DEWorkspace",
+                                    parameterType="Derived",
+                                    direction="Output")
+        
+        param9 = arcpy.Parameter(displayName="Project GeoDatabase",
+                                 name="Project_GeoDatabase",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")
 
-        param8 = arcpy.Parameter(displayName="Delineation Name",
-                                 name="Delineation_Name",
-                                 datatype="GPString",
-                                 parameterType="Derived",
-                                 direction="Output")
-
-        param9 = arcpy.Parameter(displayName="Models Directory",
+        param10 = arcpy.Parameter(displayName="Models Directory",
                                  name="Models_Directory",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")
 
-        param10 = arcpy.Parameter(displayName="Debug messages",
-                                  name="Debug",
-                                  datatype="GPString",
-                                  parameterType="Optional",
-                                  direction="Input")
-
-        param11 = arcpy.Parameter(displayName="Save Intermediate Outputs",
-                                  name="Save_Intermediate_Outputs",
-                                  datatype="GPBoolean",
-                                  parameterType="Optional",
-                                  direction="Input")
-        param11.value = False
-
-        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11]
+        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10]
         return params
 
-    # noinspection PyPep8Naming
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
         return True
 
-    # noinspection PyPep8Naming
     def updateParameters(self, parameters):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
-        agwa_directory = ""
-        discretization_name = parameters[0].value
-        workspace = ""
-        if discretization_name:
+
+        agwa_directory, workspace, prjgdb, discretization_list = "", "", "", []
+        if parameters[0].value:
+            delineation_name = parameters[0].valueAsText
             project = arcpy.mp.ArcGISProject("CURRENT")
             m = project.activeMap
-            for lyr in m.listLayers():
-                if lyr.isFeatureLayer:
-                    if lyr.supports("CONNECTIONPROPERTIES"):
-                        cp_top = lyr.connectionProperties
-                        # check if layer has a join, because the connection properties are nested below 'source' if so.
-                        cp = cp_top.get('source')
-                        if cp is None:
-                            cp = cp_top
-                        wf = cp.get("workspace_factory")
-                        if wf == "File Geodatabase":
-                            dataset_name = cp["dataset"]
-                            if dataset_name == discretization_name + "_elements":
-                                ci = cp.get("connection_info")
-                                if ci:
-                                    workspace = ci.get("database")
-                                    if workspace:
-                                        meta_workspace_table = os.path.join(workspace, "metaWorkspace")
-                                        if arcpy.Exists(meta_workspace_table):
-                                            field_names = ["AGWADirectory"]
-                                            row = None
-                                            expression = "{0} = '{1}'".format(
-                                                arcpy.AddFieldDelimiters(workspace, "DelineationWorkspace"),
-                                                workspace)
-                                            with arcpy.da.SearchCursor(meta_workspace_table, field_names,
-                                                                       expression) as cursor:
-                                                for row in cursor:
-                                                    agwa_directory = row[0]
-                                                if row is None:
-                                                    parameters[10].value = "Could not find AGWA Directory in metadata"
+            for table in m.listTables():
+                if table.name == "metaDelineation":
+                    with arcpy.da.SearchCursor(table, ["DelineationName", "ProjectGeoDataBase", 
+                                                    "DelineationWorkspace"]) as cursor:
+                        for row in cursor:
+                            if row[0] == delineation_name:
+                                prjgdb = row[1]
+                                workspace = row[2]
+                                if prjgdb and workspace:
+                                    break                                
 
-        parameters[7].value = workspace
-        workspace_directory = os.path.split(workspace)[0]
-        models_directory = os.path.join(agwa_directory, "models")
-        parameters[9].value = models_directory
+            for table in m.listTables():                    
+                if table.name == "metaWorkspace":
+                    with arcpy.da.SearchCursor(table, ["AGWADirectory", "ProjectGeoDataBase"]) as cursor:
+                        for row in cursor:
+                            if row[1] == prjgdb:
+                                agwa_directory = row[0]
+                        break
 
-        # populate the available parameter files
-        parameter_file_list = []
-        if parameters[0].value:
-            discretization_name = parameters[0].valueAsText
+            for table in m.listTables():
+                if table.name == "metaDiscretization":
+                    with arcpy.da.SearchCursor(table, ["DelineationName", "DiscretizationName"]) as cursor:
+                        for row in cursor:
+                            if row[0] == delineation_name:
+                                discretization_list.append(row[1])
+                        break
 
-            meta_discretization_table = os.path.join(workspace, "metaDiscretization")
-            if arcpy.Exists(meta_discretization_table):
-                df_discretization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table,
-                                                                            ["DelineationName", "DiscretizationName"]))
-                df_discretization_filtered = \
-                    df_discretization[df_discretization.DiscretizationName == discretization_name]
-                delineation_name = df_discretization_filtered.DelineationName.values[0]
-                parameters[8].value = delineation_name
+        parameters[1].filter.list = discretization_list
+        parameters[8].value = workspace
+        parameters[9].value = prjgdb
+        parameters[10].value = os.path.join(agwa_directory, "models")
 
-                parameter_files_path = os.path.join(workspace_directory, delineation_name, discretization_name,
-                                                    "parameter_files", '*.par')
-                parameter_file_list = glob.glob(parameter_files_path)
+        # populate the available parameter file list and precipitation files list
+        if parameters[0].value and parameters[1].value:
+            delineation_name = parameters[0].valueAsText
+            discretization_name = parameters[1].valueAsText
+            modeling_files_directory = os.path.join(os.path.split(workspace)[0], "modeling_files", discretization_name)
 
-        parameters[1].filter.list = parameter_file_list
+            parameter_files_path = os.path.join(modeling_files_directory, "parameter_files")
+            parameter_file_list = glob.glob1(parameter_files_path, "*.par")
+            parameters[2].filter.list = parameter_file_list
 
-        # populate the available precipitation files
-        precipitation_file_list = []
-        if parameters[0].value:
-            discretization_name = parameters[0].valueAsText
+            precipitation_files_path = os.path.join(modeling_files_directory, "precipitation_files")
+            precipitation_file_list = glob.glob1(precipitation_files_path, "*.pre")
+            parameters[3].filter.list = precipitation_file_list
 
-            meta_discretization_table = os.path.join(workspace, "metaDiscretization")
-            if arcpy.Exists(meta_discretization_table):
-                df_discretization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table,
-                                                                            ["DelineationName", "DiscretizationName"]))
-                df_discretization_filtered = \
-                    df_discretization[df_discretization.DiscretizationName == discretization_name]
-                delineation_name = df_discretization_filtered.DelineationName.values[0]
-
-                precipitation_files_path = os.path.join(workspace_directory, delineation_name, discretization_name,
-                                                        "precip", '*.pre')
-                precipitation_file_list = glob.glob(precipitation_files_path)
-
-        parameters[2].filter.list = precipitation_file_list
-
-        # populate the simulation duration based on the selected precipitation file
-        # add 300 minutes to the duration of the precipitation file so the runoff hydrographs are not truncated in
-        # larger watersheds and long reaches far from the outlet
-        duration = 0
-        if parameters[2].value:
-            precip_file = parameters[2].valueAsText
-            with open(precip_file) as f:
-                duration = f.readlines()[-2].split()[0]
-                parameters[5].value = int(float(duration)) + 300
+            # populate the simulation duration based on the selected precipitation file
+            # add 300 minutes to the duration of the precipitation file so the runoff hydrographs are not truncated in
+            # larger watersheds and long reaches far from the outlet
+            duration = 0
+            if parameters[3].value:
+                precip_file = os.path.join(modeling_files_directory, "precipitation_files", parameters[3].valueAsText)
+                with open(precip_file) as f:
+                    duration = f.readlines()[-2].split()[0]
+                    parameters[6].value = int(float(duration)) + 300
 
         return
 
-    # noinspection PyPep8Naming
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
+
+        if parameters[0].value:
+            delineation_name = parameters[0].valueAsText
+            project = arcpy.mp.ArcGISProject("CURRENT")
+            m = project.activeMap
+            workspace = ""
+            for table in m.listTables():
+                if table.name == "metaDelineation":
+                    with arcpy.da.SearchCursor(table, ["DelineationName", "ProjectGeoDataBase", 
+                                                       "DelineationWorkspace"]) as cursor:
+                        for row in cursor:
+                            if row[0] == delineation_name:
+                                workspace = row[2]
+                        break
+
+            if parameters[1].value:
+                parameter_file_list, precipitation_file_list = [], []
+                discretization_name = parameters[1].valueAsText
+                modeling_files_directory = os.path.join(os.path.split(workspace)[0], "modeling_files", discretization_name)
+                
+                # Check if parameter files and precipitation files exist
+                parameter_files_path = os.path.join(modeling_files_directory, "parameter_files")
+                parameter_file_list = glob.glob1(parameter_files_path, "*.par")
+                if len(parameter_file_list) == 0:
+                    parameters[1].setErrorMessage("No parameter files found for the selected delineation and discretization.")
+                
+                # Check if precipitation files exist
+                precipitation_files_path = os.path.join(modeling_files_directory, "precipitation_files")
+                precipitation_file_list = glob.glob1(precipitation_files_path, "*.pre")
+                if len(precipitation_file_list) == 0:
+                    parameters[1].setErrorMessage("No precipitation files found in the modeling files directory.")
+
+                # Check if the simulation name already exists
+                if parameters[4].value:
+                    simulation_name = parameters[4].valueAsText
+                    simulation_directory = os.path.join(modeling_files_directory, "simulations", simulation_name)
+                    if os.path.exists(simulation_directory):
+                        parameters[4].setErrorMessage("Simulation name already exists. Please choose a different name.")
+
+        if parameters[4].altered:
+            simulation_name = parameters[4].valueAsText
+            simulation_name = simulation_name.strip()
+            if re.match("^[A-Za-z0-9][A-Za-z0-9_]*$", simulation_name) is None:
+                parameters[4].setErrorMessage("The simulation name must start with a letter or a number, contain only letters,"
+                                              " numbers, and underscores.")
+
         return
+    
 
     def execute(self, parameters, messages):
         """The source code of the tool."""
         # arcpy.AddMessage("Toolbox source: " + os.path.dirname(__file__))
         arcpy.AddMessage("Script source: " + __file__)
-        discretization_par = parameters[0].valueAsText
-        parameter_file_par = parameters[1].valueAsText
-        precipitation_file_par = parameters[2].valueAsText
-        simulation_name_par = parameters[3].valueAsText
-        simulation_description_par = parameters[4].valueAsText
-        simulation_duration_par = int(parameters[5].valueAsText)
-        simulation_time_step_par = int(parameters[6].valueAsText)
-        workspace_par = parameters[7].valueAsText
-        delineation_par = parameters[8].valueAsText
-        models_directory_par = parameters[9].valueAsText
+        delineation = parameters[0].valueAsText
+        discretization = parameters[1].valueAsText
+        parameter_file = parameters[2].valueAsText
+        precipitation_file = parameters[3].valueAsText
+        simulation_name = parameters[4].valueAsText
+        simulation_description = parameters[5].valueAsText
+        simulation_duration = int(parameters[6].valueAsText)
+        simulation_time_step = int(parameters[7].valueAsText)
+        workspace = parameters[8].valueAsText
+        prjgdb = parameters[9].valueAsText
+        models_directory = parameters[10].valueAsText
 
-        workspace_directory = os.path.split(workspace_par)[0]
-        simulation_directory = os.path.join(workspace_directory, delineation_par, discretization_par, "simulations",
-                                            simulation_name_par)
+        # Get file paths
+        modeling_files_directory = os.path.join(os.path.split(workspace)[0],"modeling_files", discretization)
+        parameter_file = os.path.join(modeling_files_directory,  "parameter_files", parameter_file)
+        precipitation_file = os.path.join(modeling_files_directory, "precipitation_files", precipitation_file)
+        simulation_directory = os.path.join(modeling_files_directory,  "simulations", simulation_name)
+        k2_file = os.path.join(models_directory, "k2.exe")
+        
+        arcpy.AddMessage(f"Creating the simulation directory and subdirectories if they do not exist.\n")
         if not os.path.exists(simulation_directory):
             os.makedirs(simulation_directory)
-
-        k2_file = os.path.join(models_directory_par, "k2.exe")
-
-        # Copy the precipitation file, parameter file, and K2 executable into the simulation directory
-        shutil.copy2(parameter_file_par, simulation_directory)
-        shutil.copy2(precipitation_file_par, simulation_directory)
+        with open(parameter_file, 'r') as file:
+            content = file.read()
+            if "BEGIN POND" in content:           
+                folders = ['hillslopes', 'channels', 'ponds']
+            else:
+                folders = ['hillslopes', 'channels']
+            for folder in folders:
+                path = os.path.join(simulation_directory, folder)
+                if not os.path.exists(path):
+                    os.mkdir(path)
+            
+        arcpy.AddMessage(f"Copying the precipitation file, parameter file, and K2 executable into the simulation directory\n")
+        shutil.copy2(parameter_file, simulation_directory)
+        shutil.copy2(precipitation_file, simulation_directory)
         shutil.copy2(k2_file, simulation_directory)
 
-        # Create the run file for the simulation
-        par_path, par_name = os.path.split(parameter_file_par)
-        precip_path, precip_name = os.path.split(precipitation_file_par)
+        arcpy.AddMessage(f"Creating the run file (kin.fil) for the simulation\n")
+        par_name = os.path.split(parameter_file)[1]
+        precip_name = os.path.split(precipitation_file)[1]
         output_file = f"{os.path.splitext(par_name)[0]}_{os.path.splitext(precip_name)[0]}.out"
-        if not simulation_description_par: simulation_description_par = ""
-        courant = "y"
-        sediment = "y"
-        multipliers = "n"
-        tabular_summary = "y"
-        runfile_body = (f"{par_name},{precip_name},{output_file},{simulation_description_par},"
-                        f"{simulation_duration_par},{simulation_time_step_par},{courant},{sediment},"
+        if not simulation_description: simulation_description = ""
+        courant = "Y"
+        sediment = "Y"
+        multipliers = "N"
+        tabular_summary = "Y"
+        runfile_body = (f"{par_name},{precip_name},{output_file},{simulation_description},"
+                        f"{simulation_duration},{simulation_time_step},{courant},{sediment},"
                         f"{multipliers},{tabular_summary}")
         runfile_name = os.path.join(simulation_directory, "kin.fil")
         runfile_file = open(runfile_name, "w")
         runfile_file.write(runfile_body)
         runfile_file.close()
 
-        # Query the parameterization name used to create the selected parameter file
-        meta_parameterization_file_table = os.path.join(workspace_par, "metaParameterizationFile")
-        if not arcpy.Exists(meta_parameterization_file_table):
-            # Short-circuit and leave message
-            raise Exception("Cannot proceed. \nThe table '{}' does not exist.".format(meta_parameterization_file_table))
-
-        fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "ParameterizationFileName"]
-        df_parameterization_file = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_parameterization_file_table, fields))
-        df_parameterization_file_filtered = \
-            df_parameterization_file[(df_parameterization_file.DelineationName == delineation_par) &
-                                     (df_parameterization_file.DiscretizationName == discretization_par) &
-                                     (df_parameterization_file.ParameterizationFileName == parameter_file_par)]
-        parameterization_name = df_parameterization_file_filtered.ParameterizationName.values[0]
-
-        # Add an entry to the metaSimulation table to save the input parameters
-        out_path = workspace_par
-        out_name = "metaSimulation"
-        template = r"\schema\metaSimulation.csv"
-        config_keyword = ""
-        out_alias = ""
-        meta_simulation_table = os.path.join(out_path, out_name)
-        if not arcpy.Exists(meta_simulation_table):
-            result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
-            meta_simulation_table = result.getOutput(0)
-
-        creation_date = datetime.datetime.now()
-        agwa_version_at_creation = ""
-        agwa_gdb_version_at_creation = ""
-        arcpy.AddMessage(f"Simulation '{simulation_name_par}' written.")
-        status = "Simulation written successfully."
-        fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "ParameterizationFileName",
+        arcpy.AddMessage(f"Creating metaSimulation table if it does not exist")                       
+        fields = ["DelineationName", "DiscretizationName", "ParameterizationFilePath",
                   "PrecipitationFileName", "SimulationName", "SimulationDescription", "SimulationDuration",
                   "SimulationTimeStep", "SimulationPath", "CreationDate", "AGWAVersionAtCreation",
                   "AGWAGDBVersionAtCreation", "Status"]
-
+        
+        meta_simulation_table = os.path.join(prjgdb, "metaSimulation")
+        if not arcpy.Exists(meta_simulation_table):
+            arcpy.management.CreateTable(prjgdb, "metaSimulation")
+            for field in fields:
+                arcpy.management.AddField(meta_simulation_table, field, "TEXT")
+        else:
+            df_simulation = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_simulation_table, fields))
+            df_simulation_filtered = df_simulation[(df_simulation.DelineationName == delineation) &
+                                                    (df_simulation.DiscretizationName == discretization) &
+                                                    (df_simulation.ParameterizationFilePath == parameter_file) &
+                                                    (df_simulation.PrecipitationFileName == precipitation_file) &
+                                                    (df_simulation.SimulationName == simulation_name)]
+            if not df_simulation_filtered.empty:
+                raise Exception(f"Simulation '{simulation_name}' already exists in the metaSimulation table.")
+         
+        arcpy.AddMessage(f"Documenting the simulation information into the metaSimulation table\n")
         with arcpy.da.InsertCursor(meta_simulation_table, fields) as cursor:
-            cursor.insertRow((delineation_par, discretization_par, parameterization_name, parameter_file_par,
-                              precipitation_file_par, simulation_name_par, simulation_description_par,
-                              int(simulation_duration_par), int(simulation_time_step_par), simulation_directory,
-                              creation_date, agwa_version_at_creation, agwa_gdb_version_at_creation, status))
+            cursor.insertRow((delineation, discretization, parameter_file,
+                              precipitation_file, simulation_name, simulation_description,
+                              int(simulation_duration), int(simulation_time_step), simulation_directory,
+                              datetime.datetime.now().isoformat(), AGWA_VERSION, AGWAGDB_VERSION, "Successful"))
+
+        arcpy.AddMessage("Adding the metaSimulation table to the map")
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+        map = aprx.activeMap
+        for t in map.listTables():
+            if t.name == "metaSimulation":
+                map.removeTable(t)
+                break
+        table = Table(meta_simulation_table)
+        map.addTable(table)
+
 
         return
 
-    # noinspection PyPep8Naming
     def postExecute(self, parameters):
         """This method takes place after outputs are processed and
         added to the display."""

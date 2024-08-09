@@ -19,7 +19,6 @@ class ExportToK2Input(object):
         self.category = "Storage Tools"
         self.canRunInBackground = False
 
-    # noinspection PyPep8Naming
     def getParameterInfo(self):
         """Define parameter definitions"""
         # K2 input feature class
@@ -64,25 +63,21 @@ class ExportToK2Input(object):
         params = [param0, param1, param2, param3, param4]
         return params
 
-    # noinspection PyPep8Naming
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
         return True
 
-    # noinspection PyPep8Naming
     def updateParameters(self, parameters):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
         return
 
-    # noinspection PyPep8Naming
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
         return
 
-    # noinspection PyPep8Naming
     def execute(self, parameters, messages):
         """The source code of the tool."""
         arcpy.env.overwriteOutput = True
@@ -97,7 +92,6 @@ class ExportToK2Input(object):
         agwa.export_summary_files(pond_in_features, pond_id_field, summary_table_field, soil_type, output_folder)
         return
 
-    # noinspection PyPep8Naming
     def postExecute(self, parameters):
         """This method takes place after outputs are processed and
         added to the display."""

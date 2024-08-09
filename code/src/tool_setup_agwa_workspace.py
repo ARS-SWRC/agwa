@@ -1,24 +1,22 @@
 # -*- coding: utf-8 -*-
-import arcpy
 import os
 import sys
+import arcpy
 sys.path.append(os.path.dirname(__file__))
 import code_setup_agwa_workspace as agwa
 import importlib
 importlib.reload(agwa)
 
 
-# class name may not contain spaces, underscores, or other special characters
-# class name must start with a letter
 class SetupAgwaWorkspace(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
         self.label = "Step 1 - Setup AGWA Workspace"
-        # TODO: add description of tool
-        self.description = "TODO: Step 1 description goes here"
+        self.description = "This tool sets up the AGWA workspace in the selected geodatabase. It creates the " \
+                            "necessary tables and fields and populates them with the necessary information. It also " \
+                            "creates the necessary rasters if they are not provided."
         self.canRunInBackground = False
 
-    # noinspection PyPep8Naming
     def getParameterInfo(self):
         """Define parameter definitions"""
         param0 = arcpy.Parameter(displayName="AGWA Directory",
@@ -28,7 +26,7 @@ class SetupAgwaWorkspace(object):
                                  direction="Input")
         param0.filter.list = ['File System']
 
-        param1 = arcpy.Parameter(displayName="Delineation Workspace",
+        param1 = arcpy.Parameter(displayName="Project Geodatabase",
                                  name="Delineation_Workspace",
                                  datatype="DEWorkspace",
                                  parameterType="Required",
@@ -91,25 +89,20 @@ class SetupAgwaWorkspace(object):
         param10.filter.list = ["ArcGIS Pro", "ArcMap", "Geoprocessing Service"]
         param10.value = param10.filter.list[0]
 
-        param11 = arcpy.Parameter(displayName="Debug messages",
-                                  name="Debug",
-                                  datatype="GPString",
-                                  parameterType="Optional",
-                                  direction="Input")
-
-        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11]
+        params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10]
         return params
 
-    # noinspection PyPep8Naming
+
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
         return True
 
-    # noinspection PyPep8Naming
+
     def updateParameters(self, parameters):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
+        
         # Disable and clear the Flow Direction Raster and Flow Accumulation Raster
         # parameters if the DEM is not filled because they will be created
         if parameters[3].value:
@@ -129,56 +122,68 @@ class SetupAgwaWorkspace(object):
 
         return
 
-    # noinspection PyPep8Naming
+
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
 
+        # Ensure selected AGWA directory is correct
+        if parameters[0].altered:
+            agwa_directory_par = parameters[0].valueAsText
+            if (not os.path.exists(os.path.join(agwa_directory_par, "lookup_tables.gdb")) or 
+                not os.path.exists(os.path.join(agwa_directory_par, "models"))):
+                msg = ("The selected directory does not appear to be the correct AGWA directory. "
+                       "AGWA directory should contain folders such as 'lookup_tables.gdb' and 'models'. "
+                       "Please select the correct directory.")
+                parameters[0].setErrorMessage(msg)
+            
+
         # Ensure that the selected geodatabase has not already been set up as an AGWA workspace.
         if parameters[1].value:
-            workspace_par = parameters[1].valueAsText
-            meta_workspace_table = os.path.join(workspace_par, "metaWorkspace")
+            project_gdb_par = parameters[1].valueAsText
+            meta_workspace_table = os.path.join(project_gdb_par, "metaWorkspace")
             if arcpy.Exists(meta_workspace_table):
-                msg = "The selected geodatabase has already been set up as a delineation workspace for AGWA. Please " \
-                      "select a different or create a new file geodatabase to use."
-                parameters[1].setErrorMessage(msg)
+                msg = ("The selected geodatabase has already been set up as a delineation workspace for AGWA. Please " 
+                       "select a different or create a new file geodatabase to use. If continue, the existing " 
+                       "record will be overwritten.")
+                parameters[1].setWarningMessage(msg)
 
         # Ensure the input rasters are projected
         if parameters[2].value:
             raster = parameters[2].value
             if arcpy.Describe(raster).SpatialReference.type == "Geographic":
-                msg = "The selected raster has a Geographic spatial reference and a Projected spatial reference is " \
-                      "required. Please select a raster with a Projected coordinate system. "
+                msg = ("The selected raster has a Geographic spatial reference and a Projected spatial reference is " 
+                      "required. Please select a raster with a Projected coordinate system. ")
                 parameters[2].setErrorMessage(msg)
         if parameters[4].value:
             raster = parameters[4].value
             if arcpy.Describe(raster).SpatialReference.type == "Geographic":
-                msg = "The selected raster has a Geographic spatial reference and a Projected spatial reference is " \
-                      "required. Please select a raster with a Projected coordinate system. "
+                msg = ("The selected raster has a Geographic spatial reference and a Projected spatial reference is " 
+                      "required. Please select a raster with a Projected coordinate system. ")
                 parameters[4].setErrorMessage(msg)
         if parameters[5].value:
             raster = parameters[5].value
             if arcpy.Describe(raster).SpatialReference.type == "Geographic":
-                msg = "The selected raster has a Geographic spatial reference and a Projected spatial reference is " \
-                      "required. Please select a raster with a Projected coordinate system. "
+                msg = ("The selected raster has a Geographic spatial reference and a Projected spatial reference is " 
+                      "required. Please select a raster with a Projected coordinate system. ")
                 parameters[5].setErrorMessage(msg)
         if parameters[6].value:
             raster = parameters[6].value
             if arcpy.Describe(raster).SpatialReference.type == "Geographic":
-                msg = "The selected raster has a Geographic spatial reference and a Projected spatial reference is " \
-                      "required. Please select a raster with a Projected coordinate system. "
+                msg = ("The selected raster has a Geographic spatial reference and a Projected spatial reference is " 
+                      "required. Please select a raster with a Projected coordinate system. ")
                 parameters[6].setErrorMessage(msg)
 
         return
 
-    # noinspection PyPep8Naming
+
     def execute(self, parameters, messages):
         """The source code of the tool."""
         # arcpy.AddMessage("Toolbox source: " + os.path.dirname(__file__))
         arcpy.AddMessage("Script source: " + __file__)
 
         agwa_directory_par = parameters[0].valueAsText
-        workspace_par = parameters[1].valueAsText
+        project_gdb_par = parameters[1].valueAsText
         dem_is_filled_par = parameters[3].valueAsText
         if dem_is_filled_par.lower() == 'true':
             filled_dem_par = parameters[2].valueAsText
@@ -192,14 +197,13 @@ class SetupAgwaWorkspace(object):
         flup_par = parameters[7].valueAsText
         slope_par = parameters[8].valueAsText
         aspect_par = parameters[9].valueAsText
-        environment_par = arcpy.GetParameterAsText(10)
 
-        agwa.prepare_rasters(workspace_par, filled_dem_par, unfilled_dem_par, fd_par, fa_par, flup_par, slope_par,
+        agwa.prepare_rasters(project_gdb_par, filled_dem_par, unfilled_dem_par, fd_par, fa_par, flup_par, slope_par,
                              aspect_par, agwa_directory_par)
 
         return
 
-    # noinspection PyPep8Naming
+
     def postExecute(self, parameters):
         """This method takes place after outputs are processed and
         added to the display."""

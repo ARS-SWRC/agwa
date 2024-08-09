@@ -149,37 +149,6 @@ def feature_to_raster(in_feature, field, out_raster, dissolve_out=""):
 
     # Dissolve the polygon if a dissolve output name and path is provided
     if dissolve_out != "":
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        in_feature_name = arcpy.Describe(in_feature).name
-        in_feature_copy = f"in_memory\\{in_feature_name}_copy_{timestamp}"
-        fields = arcpy.Describe(in_feature).fields
-        for fld in fields:
-            if fld.name == field:
-                if fld.type == "String":
-                    try:
-                        tweet("Trimming white space typos from the severity field ... ")
-                        arcpy.management.CopyFeatures(in_feature, in_feature_copy)
-                        fields = [field]
-                        with arcpy.da.UpdateCursor(in_feature_copy, fields) as cursor:
-                            for row in cursor:
-                                row[0] = row[0].strip()
-                                cursor.updateRow(row)
-
-                    except arcpy.ExecuteError:
-                        # Catch arcpy geoprocessing exceptions and print error messages
-                        tweet(f"Error Messages: \n{arcpy.GetMessages(2)}", True)
-                        stop_execution("Error in function feature_to_raster - CopyFeatures tool.")
-                    else:
-                        # If there are no exceptions, check if the output was created
-                        if not arcpy.Exists(in_feature_copy):
-                            tweet(f"Copy Features output ({in_feature_copy}) does not exist!", True)
-                            stop_execution("Error in function feature_to_raster - CopyFeatures tool.")
-                        # if output was created successfully, then print out success messages
-                        tweet(f"Copy Features tool messages: \n{arcpy.GetMessages()}")
-                        tweet("Copy Features tool successfully executed!")
-                        tweet(f"Output saved at: {in_feature_copy}")
-                        in_feature = in_feature_copy
-
         try:
             tweet("Executing the Dissolve tool ... ")
             arcpy.management.Dissolve(in_feature, dissolve_out, field)
@@ -199,44 +168,13 @@ def feature_to_raster(in_feature, field, out_raster, dissolve_out=""):
             tweet(f"Output saved at: {dissolve_out}")
             # Assign the dissolve output to the in_feature variable as input for the FeatureToRaster tool
             in_feature = dissolve_out
-            # field = arcpy.Describe(in_feature).OIDFieldName
-
-    # If the severity field is a string, then convert it to an integer field
-    tweet("Checking if the severity field is of type: String ... ")
-    severity_code_field = field
-    fields = arcpy.Describe(in_feature).fields
-    for fld in fields:
-        if fld.name == field:
-            if fld.type == "String":
-                severity_code_field = "SevCode"
-                tweet(f"Converting the severity field '{field}' to the integer field '{severity_code_field}' ... ")
-                try:
-                    tweet("Executing the AddField tool ... ")
-                    arcpy.management.AddField(in_table=in_feature, field_name=severity_code_field, field_type="SHORT")
-                except arcpy.ExecuteError:
-                    # Catch arcpy geoprocessing exceptions and print error messages
-                    tweet(f"Error Messages: \n{arcpy.GetMessages(2)}", True)
-                    stop_execution("Error in function feature_to_raster - AddField tool.")
-                else:
-                    tweet("AddField tool successfully executed!")
-                    # Convert the severity string to an integer
-                    update_fields = [field, severity_code_field]
-                    with arcpy.da.UpdateCursor(in_feature, update_fields) as cursor:
-                        for row in cursor:
-                            severity_string = row[0]
-                            if severity_string.lower() == "low":
-                                row[1] = "2"
-                            elif severity_string.lower() == "moderate":
-                                row[1] = "3"
-                            if severity_string.lower() == "high":
-                                row[1] = "4"
-                            cursor.updateRow(row)
+            field = arcpy.Describe(in_feature).OIDFieldName
 
     # Convert the input polygon class to a raster for geoprocessing
     # Execute the tool
     try:
         tweet("Executing the FeatureToRaster tool ... ")
-        arcpy.conversion.FeatureToRaster(in_feature, severity_code_field, out_raster)
+        arcpy.conversion.FeatureToRaster(in_feature, field, out_raster)
     except arcpy.ExecuteError:
         # Catch arcpy geoprocessing exceptions and print error messages
         tweet(f"Error Messages: \n{arcpy.GetMessages(2)}", True)
@@ -290,7 +228,6 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
             # Call the function to dissolve and convert the feature to a raster
             feature_to_raster(in_feature, field, out_raster, dissolve_out)
             burn_severity_raster = out_raster
-
 
     # Step 3: Execute the IsNull tool
     # The ISNull converts all NoData values in the burn map to 1 and all other values to 0
@@ -413,7 +350,6 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
             stop_execution("Error in function BurnSeverity - Step 7: Save output raster.")
         else:
             tweet(f"Output Land Cover raster saved at: {output_folder}\\{new_name}{_ras_ext}")
-
 
     return output_lc
 

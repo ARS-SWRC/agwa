@@ -1,26 +1,29 @@
-# Import arcpy module
-import arcpy
-import arcpy.management  # Import statement added to provide intellisense in PyCharm
 import os
+import arcpy
 import datetime
+import arcpy.management
+from arcpy._mp import Table
+import config
+arcpy.env.parallelProcessingFactor = config.PARALLEL_PROCESSING_FACTOR
 
 
 def tweet(msg):
-    """Produce a message for both arcpy and python
-    : msg - a text message
-    """
+    """Produce a message for both arcpy and python"""
     m = "\n{}\n".format(msg)
     arcpy.AddMessage(m)
     print(m)
     print(arcpy.GetMessages())
 
 
-def prepare_rasters(workspace, filled_dem, unfilled_dem, flow_direction, flow_accumulation, flow_length_upstream,
+def prepare_rasters(prjgdb, filled_dem, unfilled_dem, flow_direction, flow_accumulation, flow_length_upstream,
                     slope, aspect, agwa_directory):
+    
+    tweet(f"AGWA Version: {config.AGWA_VERSION}")
+    tweet(f"AGWA GDB Version: {config.AGWAGDB_VERSION}")
+    
     try:
-        arcpy.env.workspace = workspace
-        workspace_folder = arcpy.Describe(arcpy.env.workspace).path
-        rasters_folder = os.path.join(workspace_folder, "input_rasters")
+        arcpy.env.workspace = prjgdb
+        rasters_folder = os.path.join(prjgdb, "input_rasters")
         if not os.path.exists(rasters_folder):
             os.makedirs(rasters_folder)
 
@@ -84,55 +87,59 @@ def prepare_rasters(workspace, filled_dem, unfilled_dem, flow_direction, flow_ac
         else:
             aspect_raster = aspect
 
-        update_metadata(workspace, filled_dem_raster, unfilled_dem, fd_raster, fa_raster, flup_raster, slope_raster,
+        # Update metadata and add the metaWorkspace table to the map
+        update_metadata(prjgdb, filled_dem_raster, unfilled_dem, fd_raster, fa_raster, flup_raster, slope_raster,
                         aspect_raster, agwa_directory)
 
     except Exception as e:
         tweet(e)
 
 
-def update_metadata(workspace, filled_dem, unfilled_dem, flow_direction, flow_accumulation, flow_length_upstream,
+
+def update_metadata(prjgdb, filled_dem, unfilled_dem, flow_direction, flow_accumulation, flow_length_upstream,
                     slope, aspect, agwa_directory):
-    out_path = workspace
-    out_name = "metaWorkspace"
-    # Note: relative paths are relevant to the toolbox location, not the script location
-    template = r"\schema\metaWorkspace.csv"
-    config_keyword = ""
-    out_alias = ""
-    result = arcpy.management.CreateTable(out_path, out_name, template, config_keyword, out_alias)
-    metadata_table = result.getOutput(0)
 
+    # Get the paths of the rasters
     desc = arcpy.Describe(unfilled_dem)
-    unfilled_dem_name = desc.name
-    unfilled_dem_path = desc.path
+    unfilled_dem_path = os.path.join(desc.path, desc.name)
     desc = arcpy.Describe(filled_dem)
-    filled_dem_name = desc.name
-    filled_dem_path = desc.path
+    filled_dem_path = os.path.join(desc.path, desc.name)
     desc = arcpy.Describe(flow_direction)
-    fd_name = desc.name
-    fd_path = desc.path
+    fd_path = os.path.join(desc.path, desc.name)
     desc = arcpy.Describe(flow_accumulation)
-    fa_name = desc.name
-    fa_path = desc.path
+    fa_path = os.path.join(desc.path, desc.name)
     desc = arcpy.Describe(flow_length_upstream)
-    flup_name = desc.name
-    flup_path = desc.path
+    flup_path = os.path.join(desc.path, desc.name)
     desc = arcpy.Describe(slope)
-    slope_name = desc.name
-    slope_path = desc.path
+    slope_path = os.path.join(desc.path, desc.name)
     desc = arcpy.Describe(aspect)
-    aspect_name = desc.name
-    aspect_path = desc.path
+    aspect_path = os.path.join(desc.path, desc.name)
     creation_date = datetime.datetime.now().isoformat()
-    agwa_version_at_creation = ""
-    agwa_gdb_version_at_creation = ""
+    agwa_version_at_creation = config.AGWA_VERSION
+    agwa_gdb_version_at_creation = config.AGWAGDB_VERSION
 
-    fields = ["DelineationWorkspace", "UnfilledDEMName", "UnfilledDEMPath", "FilledDEMName", "FilledDEMPath", "FDName",
-              "FDPath", "FAName", "FAPath", "FlUpName", "FlUpPath", "SlopeName", "SlopePath", "AspectName",
-              "AspectPath", "CreationDate", "AGWADirectory", "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation"]
+    tweet("Creating metaWorkspace table and Documenting user's inputs.")
+    # Create a metaWorkspace table
+    fields = ["ProjectGeoDataBase", "AGWADirectory", "UnfilledDEMPath",  "FilledDEMPath", 
+              "FDPath", "FAPath", "FlUpPath", "SlopePath", "AspectPath",
+               "CreationDate", "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation"]
 
-    with arcpy.da.InsertCursor(metadata_table, fields) as cursor:
-        cursor.insertRow((workspace, unfilled_dem_name, unfilled_dem_path, filled_dem_name, filled_dem_path,
-                          fd_name, fd_path, fa_name, fa_path, flup_name, flup_path, slope_name, slope_path, aspect_name,
-                          aspect_path, creation_date, agwa_directory, agwa_version_at_creation,
-                          agwa_gdb_version_at_creation))
+    row = [prjgdb, agwa_directory, unfilled_dem_path, filled_dem_path,
+           fd_path, fa_path, flup_path, slope_path, aspect_path,
+           creation_date, agwa_version_at_creation, agwa_gdb_version_at_creation]
+    
+    
+    meta_workspace_table = os.path.join(prjgdb, "metaWorkspace")
+    arcpy.CreateTable_management(prjgdb, "metaWorkspace")
+    for field in fields:
+        arcpy.AddField_management(meta_workspace_table, field, "TEXT")
+    with arcpy.da.InsertCursor(meta_workspace_table, fields) as insert_cursor:
+        insert_cursor.insertRow(row)
+
+    tweet("Adding metaWorkspace table to the map")
+    meta_workspace_table = os.path.join(prjgdb, "metaWorkspace")
+    aprx = arcpy.mp.ArcGISProject("CURRENT")
+    map = aprx.activeMap
+    table = Table(meta_workspace_table)
+    map.addTable(table)
+    aprx.save()

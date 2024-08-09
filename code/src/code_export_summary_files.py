@@ -1,4 +1,3 @@
-# Import arcpy module
 import arcpy
 import arcpy.management  # Import statement added to provide intellisense in PyCharm
 import math
@@ -18,6 +17,7 @@ def export_summary_files(pond_in_features, pond_id_field, summary_table_field, s
     ks = 0
     if soil_type == "Silty clay (Ks = 1.41 mm/hr)":
         ks = 1.41
+        
     # add filename field to K2 point file if it doesn't already exist
     filename_field = "Filename"
     field_list = arcpy.ListFields(pond_in_features)
@@ -25,6 +25,7 @@ def export_summary_files(pond_in_features, pond_id_field, summary_table_field, s
     if not filename_field in field_name:
         arcpy.AddField_management(
             pond_in_features, "Filename", "TEXT", "", "", "254", "", "NULLABLE", "NON_REQUIRED")
+        
     # look for pondID and find corresponding summary file
     fields = [pond_id_field, summary_table_field, filename_field]
     with arcpy.da.UpdateCursor(pond_in_features, fields) as pond_cursor:
