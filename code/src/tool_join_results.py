@@ -110,7 +110,6 @@ class JoinResults(object):
             discretization = parameters[1].valueAsText
             workspace = parameters[5].valueAsText
             k2_results_table = os.path.join(workspace, "k2_results")
-            table_list = arcpy.ListTables( "*", workspace)
             if arcpy.Exists(k2_results_table):
                 with arcpy.da.SearchCursor(k2_results_table, ["DelineationName", "DiscretizationName", "SimulationName"]) as cursor:
                     for row in cursor:
