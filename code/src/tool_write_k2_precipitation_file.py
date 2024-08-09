@@ -3,7 +3,7 @@ import arcpy
 import os
 import sys
 sys.path.append(os.path.dirname(__file__))
-import code_write_k2_precipitation as agwa
+import code_write_k2_precipitation_file as agwa
 import importlib
 importlib.reload(agwa)
 
