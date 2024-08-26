@@ -53,7 +53,7 @@ def initialize_workspace(prjgdb, delineation, discretization, parameterization, 
     aprx = arcpy.mp.ArcGISProject("CURRENT")
     map = aprx.activeMap
     for t in map.listTables():
-        if t.name == "metaK2PrecipitationFile":
+        if t.name == "metaParameterizationFile":
             map.removeTable(t)
             break
     table = Table(meta_parameterization_file_table)

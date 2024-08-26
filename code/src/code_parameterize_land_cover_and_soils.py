@@ -1,12 +1,10 @@
 import os
-import sys
 import math
 import arcpy
 import numpy as np
 import pandas as pd
 import arcpy.analysis
 from datetime import datetime
-sys.path.append(os.path.join(os.path.dirname(__file__)))
 import config
 arcpy.env.parallelProcessingFactor = config.PARALLEL_PROCESSING_FACTOR
 
@@ -81,19 +79,22 @@ def parameterize_hillslopes(workspace, delineation_name, discretization_name, pa
     """Parameterize hillslopes. Results: 33 parameters. Called in parameterize function."""
 
     # Step 1. intersect soils and land cover with hillslopes
-    intersect_soils(workspace, delineation_name, discretization_name, parameterization_name, soil_layer_path,
-                    soils_database_path, agwa_directory, max_thickness, max_horizons, save_intermediate_outputs)
+    tweet("Intersecting soils with hillslopes.")
+    intersect_feature_class = intersect_soils(workspace, delineation_name, discretization_name, parameterization_name,
+        soil_layer_path, soils_database_path, agwa_directory, max_thickness, max_horizons, save_intermediate_outputs)
     
+    tweet("Calculating weighted soil parameters for each hillslope.")
     df_soil = weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, discretization_name, 
-                parameterization_name,soil_layer_path, save_intermediate_outputs)
+                parameterization_name, intersect_feature_class)
     
     # Step 2. intersect land cover with hillslopes
+    tweet("Intersecting land cover with hillslopes.")
     df_cover = intersect_weight_land_cover_by_area(workspace, delineation_name, discretization_name, land_cover, 
                                                    land_cover_lut, agwa_directory)
     df_soil_cover = pd.merge(df_soil, df_cover, left_on="HillslopeID", right_on="HillslopeID", how="left")
     
     # Step 3. save the results to the workspace geodatabase
-    tweet("Saving the results to the workspace geodatabase.")
+    tweet("Saving hillslope results to the workspace geodatabase.")
     arcgis_table = os.path.join(workspace, "parameters_hillslopes")
     if not arcpy.Exists(arcgis_table):
         raise Exception(f"The table 'parameters_hillslopes' does not exist in the workspace {workspace}.")
@@ -177,7 +178,8 @@ def parameterize_channels(workspace, delineation_name, discretization_name, para
             df_channel_parameters = df_channel_parameters.assign(Ksat=ksat, Manning=manning, Pave=pave)
     else:
         tweet(f"Channel type {channel_type} not found in the Lookup table.")
-    # Save the results to the workspace geodatabase
+
+    tweet("Saving channel results to the workspace geodatabase.")
     arcgis_table = os.path.join(workspace, "parameters_channels")
     if not arcpy.Exists(arcgis_table):
         raise Exception(f"The table 'parameters_channels' does not exist in the workspace {workspace}.")
@@ -214,21 +216,28 @@ def intersect_weight_land_cover_by_area(workspace, delineation_name, discretizat
 
     # test if land cover needs a buffer
     watershed_feature_class = os.path.join(workspace, f"{delineation_name}")
-    apply_buffer_flag, buffer_size = is_raster_larger_and_buffer(land_cover, watershed_feature_class)
-    if apply_buffer_flag:        
-        watershed_buffer = os.path.join(workspace, f"{delineation_name}_{buffer_size}m")
+    buffer_size = is_raster_larger_and_buffer(land_cover, watershed_feature_class)
+    if buffer_size:
+        watershed_buffer = os.path.join(workspace, f"{delineation_name}_buffer")
         if not arcpy.Exists(watershed_buffer):
-            tweet(f"Buffering watershed by {buffer_size} meters")
             arcpy.analysis.Buffer(watershed_feature_class, watershed_buffer, f"{buffer_size} Meters", 
                                 "FULL", "ROUND", "NONE", None, "PLANAR")        
-        clipped_lc_raster = os.path.join(workspace, f"landcover_raster_{buffer_size}m_buffer")
+        clipped_lc_raster = os.path.join(workspace, f"landcover_clipped")
         if arcpy.Exists(clipped_lc_raster):
             arcpy.Delete_management(clipped_lc_raster)
-            tweet(f"Clipping raster to watershed with a buffer.")
+            tweet(f"Clipping land cover raster.")
         arcpy.Clip_management(land_cover, "", clipped_lc_raster, watershed_buffer, "", "ClippingGeometry")            
     else:
-        print("Raster is not sufficiently larger. Proceeding without buffer and clipping.")
         clipped_lc_raster = land_cover
+
+    # check projection of the land cover raster
+    sr1 = arcpy.Describe(clipped_lc_raster).spatialReference
+    sr2 = arcpy.Describe(watershed_feature_class).spatialReference
+    if sr1.name != sr2.name:
+        prj_lc_raster = os.path.join(workspace, f"{os.path.basename(clipped_lc_raster)}_prj")
+        arcpy.management.ProjectRaster(clipped_lc_raster, prj_lc_raster, sr2)
+    else:
+        prj_lc_raster = clipped_lc_raster
 
     # convert land cover raster to polygon, then intersect with hillslopes
     hillslope_feature_class = os.path.join(workspace, f"{discretization_name}_hillslopes")
@@ -240,8 +249,8 @@ def intersect_weight_land_cover_by_area(workspace, delineation_name, discretizat
     if arcpy.Exists(intersect_feature_class):
         arcpy.Delete_management(intersect_feature_class) ## delete this when testing is done
 
-    clipped_lc_raster = arcpy.sa.Int(clipped_lc_raster)
-    arcpy.RasterToPolygon_conversion(clipped_lc_raster, land_cover_feature_class, "NO_SIMPLIFY", "VALUE")
+    prj_lc_raster = arcpy.sa.Int(prj_lc_raster)
+    arcpy.RasterToPolygon_conversion(prj_lc_raster, land_cover_feature_class, "NO_SIMPLIFY", "VALUE")
     arcpy.analysis.PairwiseIntersect(f"'{land_cover_feature_class}'; '{hillslope_feature_class}'", 
                                      intersect_feature_class, "ALL", None, "INPUT")
     
@@ -288,14 +297,18 @@ def intersect_soils(workspace, delineation_name, discretization_name, parameteri
     if desc.dataType == "RasterDataset":
         soil_feature_class = convert_soil_raster_to_polygon(soil_layer_path, watershed_feature_class, 
                                                             delineation_name, workspace)
+        soil_feature_class_name = os.path.basename(soil_feature_class)    
     elif desc.dataType == "FeatureClass":
         soil_feature_class = soil_layer_path
+        soil_feature_class_name = os.path.basename(soil_feature_class)
+    elif desc.dataType == "ShapeFile":
+        soil_feature_class = soil_layer_path
+        soil_feature_class_name = os.path.basename(soil_feature_class).replace(".shp", "")
 
     # intersect soil
     hillslope_feature_class = os.path.join(workspace, f"{discretization_name}_hillslopes")
-    soil_feature_class_name = os.path.basename(soil_feature_class)
     intersect_feature_class = os.path.join(workspace, 
-                                f"{discretization_name}_{soil_feature_class_name}_intersection")
+                                f"{discretization_name}_{soil_feature_class_name}_PairwiseIntersect")
     if arcpy.Exists(intersect_feature_class):
         arcpy.Delete_management(intersect_feature_class)  
     arcpy.analysis.PairwiseIntersect(f"'{soil_feature_class}'; '{hillslope_feature_class}'", 
@@ -333,7 +346,6 @@ def intersect_soils(workspace, delineation_name, discretization_name, parameteri
     textures_not_usda_type = []
 
     for mukey in unique_mukeys:
-        
         df_component_filtered = df_component[df_component["mukey"] == mukey]
         
         # Loop 2: process each component
@@ -366,7 +378,7 @@ def intersect_soils(workspace, delineation_name, discretization_name, parameteri
                     # Loop 5: process texture (Loop 5 is not used in VB file?)
                     for _, row in df_texture[df_texture["chtgkey"] == texture_group_id].iterrows():
                         texture = row.texcl if row.texcl != "None" else row.lieutex
-                        # print(mukey, component_id, horizon_id, texture_group_id,texture_in_group_table, texture)             
+                        # print(mukey, component_id, horizon_id, texture_group_id,texture_in_group_table, texture)       
                         new_row = {"MapUnitKey": mukey, "ComponentId": component_id, "HorizonId": horizon_id,
                                    "TextureGroupId": texture_group_id, "Texture": texture} 
                         df_horizon_parameters_with_textures = pd.concat(
@@ -407,18 +419,19 @@ def intersect_soils(workspace, delineation_name, discretization_name, parameteri
                     # Note: If the 'texture_in_kinlut_flag' is False, 
                     # the variables SMax, CV, Distribution, and BPressure will not hold any values.
                     # As a result, the execution of K2 will not be possible under this condition.
-                    raise Exception(f"Texture {texture} is not found in the AGWA lookup table. "
+                    raise Exception(f"Texture '{texture}' is not found in the AGWA lookup table. "
                                     "Please add the texture to the lookup table.")
 
     textures_not_usda_type_set = set(textures_not_usda_type)
     textures_not_usda_string = ", ".join(textures_not_usda_type_set)
-    tweet(f"Textures not matching the 12 standard USDA types: {textures_not_usda_string}. \n"
-           "    Soil parameters for these textures were estimated by AGWA.")
+    tweet(f"   Textures in watershed not matching the 12 standard USDA types:\n      {textures_not_usda_string}.")
     df_weighted_by_horizon, df_weighted_by_component = calculate_weighted_hillslope_soil_parameters(df_horizon_parameters)
     save_results(workspace, delineation_name, discretization_name, parameterization_name, save_intermediate_outputs,
                  df_horizon_parameters_with_textures, df_horizon_parameters, df_weighted_by_horizon, 
                  df_weighted_by_component)
     
+    return intersect_feature_class
+
 
 def save_results(workspace, delineation_name, discretization_name, parameterization_name, save_intermediate_outputs,
                 df_horizon_parameters_with_textures, df_horizon_parameters, df_weighted_by_horizon,
@@ -623,9 +636,9 @@ def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, horizon_paramet
     texture_is_in_kin_lut = True
 
     kin_par = df_kin_lut[df_kin_lut.TextureName == texture].squeeze()
-    usda_standard_texture = ["Clay", "Clay loam", "Loam", "Loamy sand", "Sand", "Sandy clay", 
-                "Sandy clay loam", "Sandy loam", "Silt", "Silt loam", "Silty clay", "Silty clay loam"]
-    if texture not in usda_standard_texture:
+    usda_standard_texture_lower = ["clay", "clay loam", "loam", "loamy sand", "sand", "sandy clay", 
+                    "sandy clay loam", "sandy loam", "silt", "silt loam", "silty clay", "silty clay loam"]
+    if texture.lower() not in usda_standard_texture_lower:
         texture_is_usda_standard = False
 
     if kin_par.empty: 
@@ -693,7 +706,7 @@ def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, horizon_paramet
 
 
 def weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, discretization_name,
-                                                 parameterization_name, soil_layer, save_intermediate_outputs):
+                                                 parameterization_name, intersect_feature_class):
     """Weight soil parameters for each hillslope based on the intersection of hillslopes and soils. 
         14 parameters are weighted.
         called in parameterize function."""
@@ -705,9 +718,9 @@ def weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, di
                         (df_soils["DiscretizationName"] == discretization_name) &
                         (df_soils["ParameterizationName"] == parameterization_name)]
     
-    soil_feature_class_name = os.path.basename(soil_layer)
-    intersection_table = os.path.join(workspace, f"{discretization_name}_{soil_feature_class_name}_intersection")
-    df_intersections = pd.DataFrame(arcpy.da.TableToNumPyArray(intersection_table, 
+    # soil_feature_class_name = os.path.basename(soil_layer)
+    # intersection_table = os.path.join(workspace, f"{discretization_name}_{soil_feature_class_name}_intersection")
+    df_intersections = pd.DataFrame(arcpy.da.TableToNumPyArray(intersect_feature_class, 
                                                                ["HillslopeID", "MUKEY", "Shape_Area"])) 
 
     # Step 2: Merge intersection polygons with soils
@@ -723,7 +736,6 @@ def weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, di
                    "SMax", "CV", "Distribution", "BPressure"]
     df_weighted_by_area = pd.DataFrame().assign(HillslopeID=df_intersections_soils.HillslopeID.unique())
     for hillsope_id in df_intersections_soils.HillslopeID.unique():
-        # print(hillsope_id) ### remove this when testing is done
         df_hillslope = df_intersections_soils[df_intersections_soils.HillslopeID == hillsope_id]
         
         # For now: area with Pave = 1 will be excluded from the calculation
@@ -832,42 +844,52 @@ def is_raster_larger_and_buffer(raster, watershed_feature_class):
     and calculates a buffer size as 10% of the larger watershed dimension. 
     Called in convert_soil_raster_to_polygon function and intersect_weight_land_cover_by_area"""
 
+    
+    # check if the raster and watershed are in the same coordinate system, 
+    # if not, project the watershed, to save time
+    raster_spatial_ref = arcpy.Describe(raster).spatialReference
+    watershed_spatial_ref = arcpy.Describe(watershed_feature_class).spatialReference
+    if raster_spatial_ref.factoryCode != watershed_spatial_ref.factoryCode:
+        watershed_projected = arcpy.management.Project(watershed_feature_class, 
+                                        "in_memory/watershed_projected", raster_spatial_ref)
+    else:
+        watershed_projected = watershed_feature_class
+    
     # Set threshold and buffer size
     threshold_for_buffer = 1.5
-    buffer_size_pct = 15
-    
-    # Get extent
-    raster_extent = arcpy.Describe(raster).extent
-    watershed_extent = arcpy.Describe(watershed_feature_class).extent
+    buffer_size_pct = 10
 
+    # Compare raster and watershed extents
+    raster_extent = arcpy.Describe(raster).extent
+    watershed_prj_extent = arcpy.Describe(watershed_projected).extent
     # Check if the raster covers the entire watershed
-    coverage_flag = (raster_extent.XMin <= watershed_extent.XMin and
-                     raster_extent.YMin <= watershed_extent.YMin and
-                     raster_extent.XMax >= watershed_extent.XMax and
-                     raster_extent.YMax >= watershed_extent.YMax)
+    coverage_flag = (raster_extent.XMin <= watershed_prj_extent.XMin and
+                     raster_extent.YMin <= watershed_prj_extent.YMin and
+                     raster_extent.XMax >= watershed_prj_extent.XMax and
+                     raster_extent.YMax >= watershed_prj_extent.YMax)
     if not coverage_flag:
         raise Exception(f"The raster {raster} does not cover the entire watershed. "
                         "Please provide a raster that covers the entire watershed.")
 
     raster_width = raster_extent.XMax - raster_extent.XMin
     raster_height = raster_extent.YMax - raster_extent.YMin
-    watershed_width = watershed_extent.XMax - watershed_extent.XMin
-    watershed_height = watershed_extent.YMax - watershed_extent.YMin   
-
-    # Calculate buffer size as 15% of the larger dimension of the watershed
-    buffer_size = round(max(watershed_width, watershed_height) * buffer_size_pct / 100)    
+    watershed_prj_width = watershed_prj_extent.XMax - watershed_prj_extent.XMin
+    watershed_prj_height = watershed_prj_extent.YMax - watershed_prj_extent.YMin
     
-    # Determine if the raster is larger than the watershed 
-    # by the specified threshold in both dimensions
-    # Using "or" here will allow for a buffer to be applied 
-    # if the raster is larger in one dimension
-    if ((raster_width > watershed_width * threshold_for_buffer) and
-         (raster_height > watershed_height * threshold_for_buffer)):
-        buffer_flag = True
+    # Determine if the raster is larger than the watershed by the specified threshold in both dimensions
+    # Using "or" allows for a buffer if the raster is larger in one dimension
+    # Using "and" allows for a buffer if the raster is larger in both dimensions
+    # The buffer size is calculated based on original watershed feature class
+    if ((raster_width > watershed_prj_width * threshold_for_buffer) and
+         (raster_height > watershed_prj_height * threshold_for_buffer)):
+        watershed_extent = arcpy.Describe(watershed_feature_class).extent
+        watershed_width = watershed_extent.XMax - watershed_extent.XMin
+        watershed_height = watershed_extent.YMax - watershed_extent.YMin
+        buffer_size = round(max(watershed_width, watershed_height) * buffer_size_pct / 100)    
     else:
-        buffer_flag = False
+        buffer_size = None
 
-    return buffer_flag, buffer_size
+    return buffer_size
 
 
 def convert_soil_raster_to_polygon(raster, watershed_feature_class, delineation, workspace):
@@ -875,23 +897,29 @@ def convert_soil_raster_to_polygon(raster, watershed_feature_class, delineation,
         Called in intersect_soils function."""
 
     # Check if raster is substantially larger than the watershed
-    apply_buffer_flag, buffer_size = is_raster_larger_and_buffer(raster, watershed_feature_class)                                        
+    buffer_size = is_raster_larger_and_buffer(raster, watershed_feature_class)                                        
 
     # Apply buffer and clip raster to the buffered watershed
-    if apply_buffer_flag:
-        tweet(f"Applying buffer of {buffer_size} to soil raster , because it is sufficiently larger than the watershed.")
-        watershed_buffer = os.path.join(workspace, f"{delineation}_{buffer_size}m")
-        if not arcpy.Exists(watershed_buffer):
-            tweet(f"Buffering watershed by {buffer_size} meters")
+    if buffer_size:
+        watershed_buffer = os.path.join(workspace, f"{delineation}_buffer")
+        if not arcpy.Exists(watershed_buffer):            
             arcpy.analysis.Buffer(watershed_feature_class, watershed_buffer, f"{buffer_size} Meters", 
                                 "FULL", "ROUND", "NONE", None, "PLANAR")        
-        clipped_soil_raster = os.path.join(workspace, f"soil_raster_{buffer_size}m_buffer")
+        clipped_soil_raster = os.path.join(workspace, f"soil_raster_clipped")
         if not arcpy.Exists(clipped_soil_raster):
-            tweet(f"Clipping raster to buffered watershed")
+            tweet(f"Clipping soil raster.")
             arcpy.Clip_management(raster, "", clipped_soil_raster, watershed_buffer, "", "ClippingGeometry")            
     else:
-        print("Raster is not sufficiently larger. Proceeding without buffer and clipping.")
         clipped_soil_raster = raster
+
+    # check projection of the raster
+    sr1 = arcpy.Describe(clipped_soil_raster).spatialReference
+    sr2 = arcpy.Describe(watershed_feature_class).spatialReference
+    if sr1.name != sr2.name:
+        prj_lc_raster = os.path.join(workspace, f"{os.path.basename(clipped_soil_raster)}_prj")
+        arcpy.management.ProjectRaster(clipped_soil_raster, prj_lc_raster, sr2)
+    else:
+        prj_lc_raster = clipped_soil_raster
 
     # Convert raster to polygon
     tweet("Converting soil raster to polygon")
@@ -899,6 +927,6 @@ def convert_soil_raster_to_polygon(raster, watershed_feature_class, delineation,
     raster_polygon = os.path.join(workspace, f"{soil_data_name}")
     if arcpy.Exists(raster_polygon):
         arcpy.Delete_management(raster_polygon)
-    arcpy.RasterToPolygon_conversion(clipped_soil_raster, raster_polygon, "SIMPLIFY", "MUKEY")
+    arcpy.RasterToPolygon_conversion(prj_lc_raster, raster_polygon, "SIMPLIFY", "MUKEY")
 
     return raster_polygon

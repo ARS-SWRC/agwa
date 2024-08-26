@@ -304,7 +304,7 @@ class ParameterizeLandCoverAndSoils(object):
             
         # Make sure that the user has performed element parameterization before land cover and soils parameterization    
         if parameters[0].value and parameters[1].value and len(pre_element_list) == 0:
-            msg = (f"Element parameterization must be performed prior to land cover and soils" 
+            msg = (f"Element parameterization (Step 4) must be performed prior to land cover and soils" 
                    f"parameterization for selected delineation and discretization.")
             parameters[1].setErrorMessage(msg)
         
