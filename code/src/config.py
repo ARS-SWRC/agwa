@@ -8,6 +8,6 @@ AGWAGDB_VERSION = "0.5"
 AGWA_BUILD = "2024-07-20"
 
 # Parallel Processing Setting
-# Users can set this to any desired percentage or fixed number of cores
+# Users can set this to any fixed number of cores
 PARALLEL_PROCESSING_FACTOR = 0
 
