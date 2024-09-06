@@ -141,28 +141,20 @@ class WriteK2PrecipitationFile(object):
                                  parameterType="Required",
                                  direction="Input")
 
-        param15 = arcpy.Parameter(displayName="Environment",
-                                 name="Environment",
-                                 datatype="GpString",
-                                 parameterType="Optional",
-                                 direction="Input")
-        param15.filter.list = ["ArcGIS Pro", "ArcMap", "Geoprocessing Service"]
-        param15.value = param15.filter.list[0]
-
-        param16 = arcpy.Parameter(displayName="Workspace",
+        param15 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")
         
-        param17 = arcpy.Parameter(displayName="Project GeoDataBase",
+        param16 = arcpy.Parameter(displayName="Project GeoDataBase",
                                  name="ProjectGeoDataBase",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")                               
 
         params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, 
-                  param9, param10, param11, param12, param13, param14, param15, param16, param17]
+                  param9, param10, param11, param12, param13, param14, param15, param16]
         
         return params
 
@@ -209,8 +201,8 @@ class WriteK2PrecipitationFile(object):
                                 discretization_list.append(row[1])
                         break
 
-            parameters[16].value = workspace
-            parameters[17].value = prjgdb            
+            parameters[15].value = workspace
+            parameters[16].value = prjgdb            
 
         # enable the appropriate parameters based on the Storm Source
         storm_source = parameters[2].valueAsText
@@ -338,9 +330,8 @@ class WriteK2PrecipitationFile(object):
         user_rainfall_file_path = parameters[12].valueAsText
         soil_moisture = parameters[13].value
         precipitation_file_name = parameters[14].valueAsText
-        environment = parameters[15].valueAsText
-        workspace = parameters[16].valueAsText
-        prjgdb = parameters[17].valueAsText
+        workspace = parameters[15].valueAsText
+        prjgdb = parameters[16].valueAsText
 
         # convert use_nrcs_hyetograph_shape to text
         use_nrcs_hyetograph_shape = "true" if use_nrcs_hyetograph_shape else "false"

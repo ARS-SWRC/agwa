@@ -90,34 +90,26 @@ class ParameterizeElements(object):
                                  parameterType="Required",
                                  direction="Input")
 
-        param9 = arcpy.Parameter(displayName="Environment",
-                                 name="Environment",
-                                 datatype="GpString",
-                                 parameterType="Optional",
-                                 direction="Input")
-        param9.filter.list = ["ArcGIS Pro", "ArcMap", "Geoprocessing Service"]
-        param9.value = param9.filter.list[0]
-
-        param10 = arcpy.Parameter(displayName="Workspace",
+        param9 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")
         
-        param11 = arcpy.Parameter(displayName="Project Geodatabase",
+        param10 = arcpy.Parameter(displayName="Project Geodatabase",
                                  name="Project_Geodatabase",
                                  datatype="DEWorkspace",
                                  parameterType="Derived",
                                  direction="Input")
 
-        param12 = arcpy.Parameter(displayName="Save Intermediate Outputs",
+        param11 = arcpy.Parameter(displayName="Save Intermediate Outputs",
                                  name="Save_Intermediate_Outputs",
                                  datatype="GPBoolean",
                                  parameterType="Optional",
                                  direction="Input")
 
         params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9,
-                   param10, param11, param12]
+                   param10, param11]
 
         return params
 
@@ -161,8 +153,8 @@ class ParameterizeElements(object):
                                 discretization_list.append(row[1])                                
 
         parameters[1].filter.list = discretization_list
-        parameters[10].value = workspace
-        parameters[11].value = prjgdb
+        parameters[9].value = workspace
+        parameters[10].value = prjgdb
 
         # # Use previous element parameterization
         discretization_name = parameters[1].valueAsText
@@ -232,8 +224,8 @@ class ParameterizeElements(object):
         if parameters[0].value and parameters[1].value:
             delineation_name = parameters[0].valueAsText
             discretization_name = parameters[1].valueAsText
-            workspace = parameters[10].valueAsText
-            prjgdb = parameters[11].valueAsText
+            workspace = parameters[9].valueAsText
+            prjgdb = parameters[10].valueAsText
             previouse_parameterization_list = self.get_previous_element_parameterization(prjgdb, workspace,
                                                                                          delineation_name, discretization_name)
             if parameters[2].value:
@@ -330,10 +322,9 @@ class ParameterizeElements(object):
             hgr = parameters[7].valueAsText
 
         parameterization_name = parameters[8].valueAsText
-        environment = parameters[9].valueAsText
-        workspace = parameters[10].valueAsText
-        prjgdb = parameters[11].valueAsText
-        save_intermediate_outputs = (parameters[12].valueAsText or '').lower() == 'true'
+        workspace = parameters[9].valueAsText
+        prjgdb = parameters[10].valueAsText
+        save_intermediate_outputs = (parameters[11].valueAsText or '').lower() == 'true'
 
         agwa.initialize_workspace(delineation_name, prjgdb, discretization, parameterization_name, slope,
                                   flow_length, hgr)

@@ -53,6 +53,7 @@ class PlotHydrograph(object):
                                     parameterType="Optional",
                                     direction="Input")
         param3.enabled = True
+        param3.category = "Hillslope"
 
         param4 = arcpy.Parameter(displayName="Hllslope ID Selection Method",
                                  name="Hillslope_Element_ID_Selection_Method",
@@ -61,6 +62,7 @@ class PlotHydrograph(object):
                                     direction="Input")
         param4.filter.list = ["Select Elements on Map", "Input ID Manually"]
         param4.enabled = False
+        param4.category = "Hillslope"
 
         param5 = arcpy.Parameter(displayName="Hillslope Feature Class",
                                  name="Hillslope_Feature_Class",
@@ -68,6 +70,7 @@ class PlotHydrograph(object):
                                  parameterType="Optional",
                                  direction="Input")
         param5.enabled = False
+        param5.category = "Hillslope"
 
         param6 = arcpy.Parameter(displayName="Hillslope ID Selected",
                                  name="HillslopeID_List",
@@ -76,6 +79,7 @@ class PlotHydrograph(object):
                                  direction="Input")        
         param6.parameterDependencies = [param5.name]
         param6.enabled = False
+        param6.category = "Hillslope"
 
         param7 = arcpy.Parameter(displayName="Refresh Hillslope ID Selection",
                                     name="Refresh_Hillslope_Selection",
@@ -84,6 +88,7 @@ class PlotHydrograph(object):
                                     direction="Input")
         param7.value = False
         param7.enabled = False
+        param7.category = "Hillslope"
 
         param8 = arcpy.Parameter(displayName="Input Hillslope IDs, separated by comma ','",
                                     name="Input_Hillslope_IDs",
@@ -91,6 +96,7 @@ class PlotHydrograph(object):
                                     parameterType="Optional",
                                     direction="Input")
         param8.enabled = False
+        param8.category = "Hillslope"
         
         # Channel parameters
         param9 = arcpy.Parameter(displayName="Plot Channel Element(s)",
@@ -99,7 +105,8 @@ class PlotHydrograph(object):
                             parameterType="Optional",
                             direction="Input")
         param9.enabled = True
-
+        param9.category = "Channel"
+        
         param10 = arcpy.Parameter(displayName="Channel ID Selection Method",
                                  name="Channel_Element_ID_Selection_Method",
                                     datatype="GPString",
@@ -107,13 +114,15 @@ class PlotHydrograph(object):
                                     direction="Input")
         param10.filter.list = ["Select Elements on Map", "Input ID Manually"]
         param10.enabled = False
-
+        param10.category = "Channel"
+        
         param11 = arcpy.Parameter(displayName="Channel Feature Class",
                                  name="Channel_Feature_Class",
                                 datatype="GPFeatureLayer",
                                 parameterType="Optional",
                                 direction="Input")
         param11.enabled = False
+        param11.category = "Channel"
 
         param12 = arcpy.Parameter(displayName="Channel ID Selected",
                                     name="ChannelID_List",
@@ -122,6 +131,7 @@ class PlotHydrograph(object):
                                     direction="Input")
         param12.parameterDependencies = [param10.name]
         param12.enabled = False
+        param12.category = "Channel"
 
         param13 = arcpy.Parameter(displayName="Refresh Channel ID Selection",
                                     name="Refresh_Channel_Selection",
@@ -130,6 +140,7 @@ class PlotHydrograph(object):
                                     direction="Input")
         param13.value = False
         param13.enabled = False
+        param13.category = "Channel"
 
         param14 = arcpy.Parameter(displayName="Input Channel IDs, separated by comma ','",
                                     name="Input_Channel_IDs",
@@ -137,6 +148,7 @@ class PlotHydrograph(object):
                                     parameterType="Optional",
                                     direction="Input")
         param14.enabled = False
+        param14.category = "Channel"
 
         param15 = arcpy.Parameter(displayName="Unit",
                                  name="Unit",
@@ -144,13 +156,15 @@ class PlotHydrograph(object):
                                  parameterType="Required",
                                  direction="Input")
         param15.filter.list = ["Metric", "English"]
+        param15.category = "Output Variable"
 
         param16 = arcpy.Parameter(displayName="Output Variable",
                                  name="Output",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
-                                         
+        param16.category = "Output Variable"
+        
         param17 = arcpy.Parameter(displayName="Simulation Directory",
                                  name="Simulation_Directory",
                                  datatype="GPString",
@@ -162,19 +176,21 @@ class PlotHydrograph(object):
                                     datatype="GPBoolean",
                                     parameterType="Optional",
                                     direction="Input")
-        
+        param18.category = "Display Options"
         param19 = arcpy.Parameter(displayName="Auto-Display Graph(s) on Screen",
                                   name= "Auto_Display_Graphs",
                                   datatype="GPBoolean",
                                   parameterType="Optional",
                                   direction="Input")
-        
+        param19.category = "Display Options"
+
         param20 = arcpy.Parameter(displayName="Show Graph File(s) in Explorer",
                                   name= "Auto_Display_Graphs_Explorer",
                                   datatype="GPBoolean",
                                   parameterType="Optional",
                                   direction="Input")
         param20.value = True
+        param20.category = "Display Options"
 
         param21 = arcpy.Parameter(displayName="Workspace",
                                     name="Workspace",
@@ -188,6 +204,7 @@ class PlotHydrograph(object):
                                   parameterType="Optional",
                                   direction="Input")
         param22.value = False
+        param22.category = "Output Variable"
 
         params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, 
                   param9, param10, param11, param12, param13, param14, param15, param16,

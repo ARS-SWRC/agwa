@@ -47,22 +47,15 @@ class DelineateWatershed(object):
                                  parameterType="Required",
                                  direction="Input")
 
-        param4 = arcpy.Parameter(displayName="Environment",
-                                 name="Environment",
-                                 datatype="GpString",
-                                 parameterType="Required",
-                                 direction="Input")
-        param4.filter.list = ["ArcGIS Pro", "ArcMap", "Geoprocessing Service"]
-        param4.value = param4.filter.list[0]
 
-        param5 = arcpy.Parameter(displayName="Save Intermediate Outputs",
+        param4 = arcpy.Parameter(displayName="Save Intermediate Outputs",
                                  name="Save_Intermediate_Outputs",
                                  datatype="GPBoolean",
                                  parameterType="Optional",
                                  direction="Input")
-        param5.value = False
+        param4.value = False
 
-        params = [param0, param1, param2, param3, param4, param5]
+        params = [param0, param1, param2, param3, param4]
         return params
 
     def isLicensed(self):
@@ -127,8 +120,7 @@ class DelineateWatershed(object):
         outlet_feature_set = parameters[1].valueAsText
         snap_radius = float(parameters[2].valueAsText)
         delineation_name = parameters[3].valueAsText
-        environment = arcpy.GetParameterAsText(4)
-        save_intermediate_outputs = arcpy.GetParameterAsText(5).lower() == 'true'
+        save_intermediate_outputs = arcpy.GetParameterAsText(4).lower() == 'true'
 
         delineation_name = delineation_name.strip()
         agwa.initialize_workspace(prj_gdb, delineation_name, outlet_feature_set, snap_radius)

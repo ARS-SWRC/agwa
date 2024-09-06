@@ -216,8 +216,10 @@ def fetch_noaa_data(latitude, longitude, duration, recurrence, quantile_type, qu
                 if len(parts) == 2:
                     key, value = parts
                     parsed_data[key.strip()] = value.strip().strip("';")        
+    elif response.status_code == 500:
+        raise Exception("NOAA server error. Please try again later.")
     else:
-        raise Exception("Failed to fetch NOAA data")
+        raise Exception(f"Failed to fetch NOAA data: {response.status_code}")
     
     # get the rainfall volume for the specified duration and recurrence
     duration_list_string = ["5min", "10min", "15min", "30min", "60min", "2hr", "3hr", "6hr", "12hr", "24hr", 

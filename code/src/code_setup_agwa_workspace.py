@@ -24,10 +24,13 @@ def setup_agwa_workspace(prjgdb, filled_dem, unfilled_dem, fd, fa, flup, slope,
     
     tweet(f"AGWA Version: {config.AGWA_VERSION}")
     tweet(f"AGWA GDB Version: {config.AGWAGDB_VERSION}")
-    tweet(f"Parallel processing enabled with {config.PARALLEL_PROCESSING_FACTOR} cores.")
+    if config.PARALLEL_PROCESSING_FACTOR > 0:
+        tweet(f"Parallel processing enabled with {config.PARALLEL_PROCESSING_FACTOR} cores.")
 
     try:
         arcpy.env.workspace = prjgdb
+        arcpy.env.resamplingMethod = "CUBIC"
+        
         if use_default_agwa_raster_gdb:
             prjgdb_dir = os.path.dirname(prjgdb)
             raster_gdb = os.path.join(prjgdb_dir, "agwa_created_input_rasters.gdb")
@@ -136,6 +139,7 @@ def setup_agwa_workspace(prjgdb, filled_dem, unfilled_dem, fd, fa, flup, slope,
         tweet(f"An error occurred: {str(e)}")
         arcpy.AddError(f"Error in setup_agwa_workspace: {str(e)}")
     finally:
+        arcpy.env.resamplingMethod = "BILINEAR"
         arcpy.ResetProgressor()
 
 

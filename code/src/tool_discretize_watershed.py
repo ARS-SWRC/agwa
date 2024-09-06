@@ -48,7 +48,7 @@ class DiscretizeWatershed(object):
                                  parameterType="Required",
                                  direction="Input")
         param2.filter.list = ["Threshold-based", "Channel initiation points", "Existing channel network"]
-
+        param2.category = "Stream Definition"
 
         param3 = arcpy.Parameter(displayName="Threshold-based Method",
                                 name="Threshold_method",
@@ -57,6 +57,7 @@ class DiscretizeWatershed(object):
                                 direction="Input")
         param3.filter.list = ["Flow length (unit: m)", "Flow accumulation (unit: %)"]
         param3.enabled = False
+        param3.category = "Stream Definition"
 
         param4 = arcpy.Parameter(displayName="Threshold Value",
                                 name="Threshold",
@@ -64,6 +65,7 @@ class DiscretizeWatershed(object):
                                 parameterType="Optional",
                                 direction="Input")
         param4.enabled = False
+        param4.category = "Stream Definition"
 
         param5 = arcpy.Parameter(displayName="Existing channel network",
                                 name="existing_stream_network_feature_class",
@@ -71,6 +73,7 @@ class DiscretizeWatershed(object):
                                 parameterType="Optional",
                                 direction="Input")
         param5.enabled = False
+        param5.category = "Stream Definition"
 
         param6 = arcpy.Parameter(displayName="Snapping distance (m)",
                                 name="existing_stream_network_snap_distance",
@@ -78,6 +81,7 @@ class DiscretizeWatershed(object):
                                 parameterType="Optional",
                                 direction="Input")
         param6.enabled = False
+        param6.category = "Stream Definition"
 
 
         param7 = arcpy.Parameter(displayName="Channel initiation points",
@@ -86,6 +90,7 @@ class DiscretizeWatershed(object):
                                 parameterType="Optional",
                                 direction="Input")
         param7.enabled = False
+        param7.category = "Stream Definition"
 
         param8 = arcpy.Parameter(displayName="Snapping distance (m)",
                                 name="channel_inition_points_snap_distance",
@@ -93,7 +98,7 @@ class DiscretizeWatershed(object):
                                 parameterType="Optional",
                                 direction="Input")
         param8.enabled = False
-
+        param8.category = "Stream Definition"
 
         param9 = arcpy.Parameter(displayName="Internal Pour Points Methodology",
                                 name="select_ipp_method",
@@ -102,6 +107,7 @@ class DiscretizeWatershed(object):
                                 direction="Input")
         param9.filter.type = "ValueList"
         param9.filter.list = ["None", "Point theme"]
+        param9.category = "Internal Pour Points"
 
         param10 = arcpy.Parameter(displayName="Select Internal Pour Points",
                                  name="assigned_point_ids",
@@ -109,6 +115,7 @@ class DiscretizeWatershed(object):
                                  parameterType="Optional",
                                  direction="Input")
         param10.enabled = False
+        param10.category = "Internal Pour Points"
 
         param11 = arcpy.Parameter(displayName="Snapping Distance (m)",
                                  name="snapping_distance",
@@ -116,41 +123,39 @@ class DiscretizeWatershed(object):
                                  parameterType="Optional",
                                  direction="Input")
         param11.enabled = False
+        param11.category = "Internal Pour Points"
 
         param12 = arcpy.Parameter(displayName="Discretization Name",
                                  name="discretization_name",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")
+        param12.category = "Output"
 
-        param13 = arcpy.Parameter(displayName="Environment",
-                                 name="Environment",
-                                 datatype="GpString",
-                                 parameterType="Required",
-                                 direction="Input")
-        param13.filter.list = ["ArcGIS Pro", "ArcMap", "Geoprocessing Service"]
-        param13.value = param13.filter.list[0]
-
-        param14 = arcpy.Parameter(displayName="Workspace",
+        param13 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
                                  datatype="DEWorkspace",
                                  parameterType="Derived",
                                  direction="Input")
+        param13.category = "Output"
 
-        param15 = arcpy.Parameter(displayName="Project Geodatabase",
+        param14 = arcpy.Parameter(displayName="Project Geodatabase",
                                  name="Workspace",
                                  datatype="DEWorkspace",
                                  parameterType="Derived",
                                  direction="Input")
+        param14.category = "Output"
 
-        param17 = arcpy.Parameter(displayName="Save Intermediate Outputs",
+        param15 = arcpy.Parameter(displayName="Save Intermediate Outputs",
                                   name="Save_Intermediate_Outputs",
                                   datatype="GPBoolean",
                                   parameterType="Optional",
                                   direction="Input")
+        param15.category = "Output"
 
         params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, 
-                  param9, param10, param11, param12, param13, param14, param15, param17]
+                  param9, param10, param11, param12, param13, param14, param15]        
+
         
         return params
 
@@ -207,11 +212,13 @@ class DiscretizeWatershed(object):
                             if row[0] == delineation_name:
                                 project_geodatabase = row[1]
                                 workspace = row[2]
-                parameters[14].value = workspace
-                parameters[15].value = project_geodatabase
+            if workspace:
+                parameters[13].value = workspace
+            if project_geodatabase:
+                parameters[14].value = project_geodatabase
 
         else:
-            parameters[14].value = "Waiting for AGWA Delineation selection."
+            parameters[13].value = "Waiting for AGWA Delineation selection."
 
         return
 
@@ -245,7 +252,7 @@ class DiscretizeWatershed(object):
         # check if the discretization name is unique
         if parameters[0].value and parameters[12].value:
             delineation_name = parameters[0].valueAsText
-            prjgdb = parameters[15].valueAsText
+            prjgdb = parameters[14].valueAsText
             meta_discretization_table = os.path.join(prjgdb, "metaDiscretization")
             if arcpy.Exists(meta_discretization_table):
                 df_discretization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table,
@@ -278,9 +285,9 @@ class DiscretizeWatershed(object):
         discretization_name = parameters[12].valueAsText
         discretization_name = discretization_name.strip()
         environment = parameters[13].valueAsText
-        workspace = parameters[14].valueAsText
-        prjgdb = parameters[15].valueAsText
-        save_intermediate_outputs = (parameters[16].valueAsText or '').lower() == 'true'
+        workspace = parameters[13].valueAsText
+        prjgdb = parameters[14].valueAsText
+        save_intermediate_outputs = (parameters[15].valueAsText or '').lower() == 'true'
 
         # Parameters that are conditionally enabled
         threshold_method = parameters[3].valueAsText if parameters[3].enabled else None

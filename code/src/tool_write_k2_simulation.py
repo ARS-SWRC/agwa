@@ -61,7 +61,7 @@ class WriteK2Simulation(object):
                                  parameterType="Required",
                                  direction="Input")
 
-        param5 = arcpy.Parameter(displayName="Simulation Description (optional)",
+        param5 = arcpy.Parameter(displayName="Simulation Description (Optional)",
                                  name="Simulation_Description",
                                  datatype="GPString",
                                  parameterType="Optional",

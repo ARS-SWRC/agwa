@@ -823,11 +823,11 @@ def calculate_stream_slope(workspace, delineation_name, discretization_name, par
     # Remove Join in reverse order
     arcpy.management.RemoveJoin(parameters_channels_table_view, sample_downstream_name)
     arcpy.management.RemoveJoin(parameters_channels_table_view, sample_upstream_name)
-
-    # Calculate Field
+ 
+    # Calculate Field with minimum threshold
     arcpy.management.CalculateField(parameters_channels_table_view, "MeanSlope",
-                                    "(!UpstreamElevation!-!DownstreamElevation!) / !ChannelLength!", "PYTHON3", '',
-                                    "TEXT", "NO_ENFORCE_DOMAINS")
+                                    "max(0.0001, (!UpstreamElevation! - !DownstreamElevation!) / !ChannelLength!)",
+                                    "PYTHON3", '', "DOUBLE", "NO_ENFORCE_DOMAINS")
 
     arcpy.management.Delete(parameters_channels_table_view)
     arcpy.management.DeleteField(channels_feature_class,
@@ -1036,3 +1036,4 @@ def read_extract_parameters(prjgdb, delineation_name, discretization_name, param
     return (unfilled_dem_raster, slope_raster, aspect_raster, agwa_directory, flow_length_method, hgr_method, 
             slope_method, fa_raster, flow_length_raster)   
    
+

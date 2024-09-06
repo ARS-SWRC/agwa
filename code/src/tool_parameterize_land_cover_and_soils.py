@@ -112,35 +112,27 @@ class ParameterizeLandCoverAndSoils(object):
                                  parameterType="Optional",
                                  direction="Input")
 
-        param13 = arcpy.Parameter(displayName="Environment",
-                                 name="Environment",
-                                 datatype="GpString",
-                                 parameterType="Optional",
-                                 direction="Input")
-        param13.filter.list = ["ArcGIS Pro", "ArcMap", "Geoprocessing Service"]
-        param13.value = param13.filter.list[0]
-
-        param14 = arcpy.Parameter(displayName="Workspace",
+        param13 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Output")
         
-        param15 = arcpy.Parameter(displayName="Project Geodatabase",
+        param14 = arcpy.Parameter(displayName="Project Geodatabase",
                                  name="Project_Geodatabase",
                                  datatype="DEWorkspace",
                                  parameterType="Derived",
                                  direction="Input")
 
-        param16 = arcpy.Parameter(displayName="Save Intermediate Outputs",
+        param15 = arcpy.Parameter(displayName="Save Intermediate Outputs",
                                  name="Save_Intermediate_Outputs",
                                  datatype="GPBoolean",
                                  parameterType="Optional",
                                  direction="Input")
-        param16.value = False
+        param15.value = False
 
         params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, 
-                  param11, param12, param13, param14, param15, param16]
+                  param11, param12, param13, param14, param15]
 
         return params
 
@@ -209,8 +201,8 @@ class ParameterizeLandCoverAndSoils(object):
                                 agwa_directory = row[0]                                        
 
         delineation_name = parameters[0].valueAsText        
-        parameters[14].value = workspace
-        parameters[15].value = prjgdb        
+        parameters[13].value = workspace
+        parameters[14].value = prjgdb        
         parameters[1].filter.list = discretization_list
         discretization_name = parameters[1].valueAsText
         pre_soil_cover_list, pre_element_list = self.get_previous_parameterization(prjgdb, delineation_name, discretization_name)
@@ -350,9 +342,9 @@ class ParameterizeLandCoverAndSoils(object):
             channel_type = parameters[11].valueAsText
 
         parameterization_name = parameters[12].valueAsText
-        workspace = parameters[14].valueAsText
-        prjgdb = parameters[15].valueAsText
-        save_intermediate_outputs = (parameters[16].valueAsText or '').lower() == 'true'
+        workspace = parameters[13].valueAsText
+        prjgdb = parameters[14].valueAsText
+        save_intermediate_outputs = (parameters[15].valueAsText or '').lower() == 'true'
   
         agwa.initialize_workspace(delineation, discretization, parameterization_name, prjgdb, land_cover, 
                                   lookup_table, soils, soils_database, max_horizons, max_thickness, channel_type)
