@@ -4,4 +4,4 @@ __pycache__/
 *.log
 *.docx
 zrun.py
-commit_log_details.md
+CHANGELOG.md

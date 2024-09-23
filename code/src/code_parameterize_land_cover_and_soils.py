@@ -133,7 +133,7 @@ def parameterize_channels(workspace, delineation_name, discretization_name, para
         returned 17 parameters"""
 
         parameters = ["Ksat", "Manning", "Pave", "Imperviousness", "SMax", "CV", "G", "Porosity", "Rock",
-                    "Sand", "Silt", "Clay", "Splash", "Cohesion", "Distribution", "BPressure"]                                          
+                    "Sand", "Silt", "Clay", "Splash", "Cohesion", "Distribution"]                                          
 
         df_channels = pd.DataFrame(arcpy.da.TableToNumPyArray(
             os.path.join(workspace, f"{discretization_name}_channels"), ["ChannelID"]))
@@ -286,11 +286,33 @@ def intersect_weight_land_cover_by_area(workspace, delineation_name, discretizat
 def intersect_soils(workspace, delineation_name, discretization_name, parameterization_name, soil_layer_path, 
                     soil_gdb, agwa_directory, max_thickness, max_horizons, save_intermediate_outputs):
 
-    """Intersect soils with gSSURGO tables and calculate parameters 
-        for each soil component, horizon, and texture.
-       Outputs include tables that are saved to the workspace geodatabase.
-       called in parameterize function."""
+    """Intersect soils with gSSURGO tables and query parameters for each soil component, horizon, and texture.
+    Outputs include tables that are saved to the workspace geodatabase. Called in parameterize function."""
             
+    # Step 1: Intersect soils with hillslopes
+    intersect_feature_class = intersect_soil_with_hillslopes(soil_layer_path, delineation_name, discretization_name, workspace)
+    
+    # Step 2: Load tables       
+    df_mapunit, df_component, df_horizon, df_texture_group, df_texture, df_kin_lut = load_tables(
+        soil_gdb, agwa_directory, intersect_feature_class)    
+
+    # Step 3: Query soil parameters
+    df_horizon_parameters = query_soil_parameters(df_mapunit, df_component, df_horizon,
+         df_texture_group, df_texture, df_kin_lut, max_thickness, max_horizons)
+
+    # Step 4: Calculate weighted soil parameters
+    df_weighted_by_horizon, df_weighted_by_component = calculate_weighted_hillslope_soil_parameters(df_horizon_parameters)
+
+    # Step 5: Save results
+    save_results(workspace, delineation_name, discretization_name, parameterization_name, save_intermediate_outputs,
+                 df_horizon_parameters, df_weighted_by_horizon, df_weighted_by_component)
+    
+    return intersect_feature_class
+
+
+def intersect_soil_with_hillslopes(soil_layer_path, delineation_name, discretization_name,workspace):
+    """Intersect soil with hillslopes."""
+
     # convert soil raster to polygon
     watershed_feature_class = os.path.join(workspace, f"{delineation_name}")
     desc = arcpy.Describe(soil_layer_path)
@@ -305,15 +327,22 @@ def intersect_soils(workspace, delineation_name, discretization_name, parameteri
         soil_feature_class = soil_layer_path
         soil_feature_class_name = os.path.basename(soil_feature_class).replace(".shp", "")
 
-    # intersect soil
     hillslope_feature_class = os.path.join(workspace, f"{discretization_name}_hillslopes")
     intersect_feature_class = os.path.join(workspace, 
                                 f"{discretization_name}_{soil_feature_class_name}_PairwiseIntersect")
     if arcpy.Exists(intersect_feature_class):
         arcpy.Delete_management(intersect_feature_class)  
+    
+    tweet(f"Intersecting {soil_feature_class_name} with {discretization_name}_hillslopes.")
     arcpy.analysis.PairwiseIntersect(f"'{soil_feature_class}'; '{hillslope_feature_class}'", 
-                                     intersect_feature_class, "ALL", None, "INPUT")
-        
+                                    intersect_feature_class, "ALL", None, "INPUT")
+    
+    return intersect_feature_class
+
+
+def load_tables(soil_gdb, agwa_directory, intersect_feature_class):
+    """Load tables from gSSURGO database and AGWA lookup table."""
+
     # reading tables from AGWA directory and gSSURGO database
     component_table = os.path.join(soil_gdb, "component")
     horizon_table = os.path.join(soil_gdb, "chorizon")
@@ -323,131 +352,151 @@ def intersect_soils(workspace, delineation_name, discretization_name, parameteri
     
     # define fields needed and read tables into dataframes
     component_fields = ["cokey", "comppct_r", "mukey"]
-    horizon_fields = ["cokey", "chkey", "hzdept_r", "hzdepb_r", "ksat_r", "sandtotal_r", "silttotal_r", "claytotal_r",
-                      "dbthirdbar_r", "partdensity", "sieveno10_r", "kwfact"]
-    texture_group_fields = ["chkey", "chtgkey", "texture"]
-    texture_fields = ["chtgkey", "texcl", "lieutex"]
-    kin_lut_fields = ["TextureName", "KS", "G", "POR", "SMAX", "CV", "SAND", "SILT", "CLAY", "DIST", "KFF", "BPressure"]
+    horizon_fields = ["cokey", "chkey", "hzname", "hzdept_r", "hzdepb_r", "ksat_r", "sandtotal_r", "silttotal_r", "claytotal_r",
+                    "dbthirdbar_r", "partdensity", "sieveno10_r", "kwfact"]
+    # texture_group_fields = ["chkey", "chtgkey", "texture", "texdesc", "rvindicator"]
+    # texture_fields = ["chtgkey", "texcl", "lieutex"]
+    # kin_lut_fields = ["TextureName", "KS", "G", "POR", "SMAX", "CV", "SAND", "SILT", "CLAY", "DIST", "KFF"]
     df_mapunit = pd.DataFrame(arcpy.da.TableToNumPyArray(intersect_feature_class, ["mukey"]))
     df_component = pd.DataFrame(arcpy.da.TableToNumPyArray(component_table, component_fields, skip_nulls=False))
     df_horizon = pd.DataFrame(arcpy.da.TableToNumPyArray(horizon_table, horizon_fields))
-    df_texture_group = pd.DataFrame(arcpy.da.TableToNumPyArray(texture_group_table, texture_group_fields))
-    df_texture = pd.DataFrame(arcpy.da.TableToNumPyArray(texture_table, texture_fields))
-    df_kin_lut = pd.DataFrame(arcpy.da.TableToNumPyArray(kin_lut_table, kin_lut_fields))
+    df_texture_group = pd.DataFrame(arcpy.da.TableToNumPyArray(texture_group_table, "*"))
+    df_texture = pd.DataFrame(arcpy.da.TableToNumPyArray(texture_table, "*"))
+    df_kin_lut = pd.DataFrame(arcpy.da.TableToNumPyArray(kin_lut_table, "*"))
 
-    # start processing each mukey found in the intersection feature class
-    df_horizon_parameters_with_textures = pd.DataFrame()
-    df_horizon_parameters = pd.DataFrame()
+    return df_mapunit, df_component, df_horizon, df_texture_group, df_texture, df_kin_lut
+
+
+def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group, df_texture, df_kin_lut, max_thickness, max_horizons):
+    """Query soil parameters. Called in intersect_soils function.
+
+        Note on Pave Textures:
+            This is inherited from the original VB code.
+            Pave = 1 when the texture is one of ["WB", "UWB", "ICE", "CEM", "IND", "GYP"].
+            "BR" and "CEM_BR", both of which represent bedrock in the gSSURGO_CA database, are added to the list.
+            "VAR", which means "variable" in the gSSURGO_CA database, is also added,
+            but it needs to be confirmed if Pave=1 is correct for this type.
+            The list could potentially be updated and expanded with applying gSSURGO database in other States.
+
+            When Pave=1, Sand, Clay and Silt are set to 0.33, 0.33, and 0.34, respectively. 
+            The values do not matter, but they need to sum to 1, so K2 can be executed.
+            Also, they will be excluded from the calculation of the weighted parameters. 
+        Note on Step 4:
+            in gSSURGO database, it is possible that a horizon can have multiple texture groups
+            Solution: Get all texture groups and use the one with RV= Yes 
+            (it should be only one RV texture group per horizon, but just in case, used .values[0])
+        Note on Step 6: 
+            some parameters are queried from both SSURGO chorizon table and kin_lut table.
+            for those parameters exist in kin_lut table, the parameters from kin_lut table will be used.
+    """
+
     
-    # Loop 1: process each mukey
+    df_horizon_parameters_all = pd.DataFrame()
+    textures_list_not_usda_type = []
+    textures_list_not_in_kinlut = []
+
+    tweet("Querying soil parameters.")
+
     df_component.mukey = df_component.mukey.astype(str)
     df_mapunit.mukey = df_mapunit.mukey.astype(str)
-    unique_mukeys = df_mapunit["mukey"].unique()
-    textures_not_usda_type = []
 
-    for mukey in unique_mukeys:
+    # Step 1: Loop 1, process each mukey
+    for mukey in df_mapunit["mukey"].unique():
+        print(mukey)
         df_component_filtered = df_component[df_component["mukey"] == mukey]
         
-        # Loop 2: process each component
+        # Step 2: Loop 2, process each component
         for _, row in df_component_filtered.iterrows():
             component_id = row.cokey
             ComponentPercentage = row.comppct_r           
 
-            # Loop 3: process each horizon
-            df_horizon_filtered = df_horizon[(df_horizon["cokey"] == component_id) & 
-                                             (df_horizon["hzdept_r"] < max_thickness)].reset_index(drop=True)
+            df_horizon_filtered = df_horizon[
+                (df_horizon["cokey"] == component_id) & 
+                (df_horizon["hzdept_r"] < max_thickness)].sort_values(by='hzdept_r', ascending=True)
+
             if df_horizon_filtered.empty:
                 continue
-            horizon_count = 0            
-            for _, row in df_horizon_filtered.iterrows():    
-                horizon_count += 1
-                if not (max_horizons == 0 or horizon_count <= max_horizons):
-                    break
+            
+            if max_horizons > 0:
+                df_horizon_filtered = df_horizon_filtered.head(max_horizons)
+            else:
+                raise Exception(f"The maximum number of horizons must be greater than 0. Current value is {max_horizons}.")
+
+            # Step 3: Loop 3, process each horizon
+            for horizon_count, (_, row) in enumerate(df_horizon_filtered.iterrows(), start=1):
+                df_horizon_parameters = pd.DataFrame()
                 horizon_id = row.chkey
-                horizon_parameters = query_soil_horizon_parameters(row, horizon_count, max_horizons)
-                horizon_parameters["MapUnitKey"] = mukey
-                horizon_parameters["ComponentId"] = component_id
-                horizon_parameters["ComponentPercentage"] = ComponentPercentage
 
-                # Loop 4: process texture group  
-                # there is a potential issue here: from the gSSURGO tables, 1 horizon can have multiple texture groups
+                # Step 4: process texture group                
                 df_texture_group_filtered = df_texture_group[df_texture_group["chkey"] == horizon_id]
-                for _, row in df_texture_group_filtered.iterrows():
-                    texture_group_id, texture_in_group_table = row.chtgkey, row.texture
 
-                    # Loop 5: process texture (Loop 5 is not used in VB file?)
-                    for _, row in df_texture[df_texture["chtgkey"] == texture_group_id].iterrows():
-                        texture = row.texcl if row.texcl != "None" else row.lieutex
-                        # print(mukey, component_id, horizon_id, texture_group_id,texture_in_group_table, texture)       
-                        new_row = {"MapUnitKey": mukey, "ComponentId": component_id, "HorizonId": horizon_id,
-                                   "TextureGroupId": texture_group_id, "Texture": texture} 
-                        df_horizon_parameters_with_textures = pd.concat(
-                            [df_horizon_parameters_with_textures, pd.DataFrame([new_row])], axis=0, ignore_index=True)
+                # Filter once and extract the values
+                rv_yes_row = df_texture_group_filtered[df_texture_group_filtered["rvindicator"].str.lower() == "yes"].iloc[0]
+                chtgkey_RV_Yes = rv_yes_row['chtgkey']
+                texture_class_RV_Yes = rv_yes_row['texture']
+                texture_desc_RV_Yes = rv_yes_row['texdesc']                
                 
-                # Query the kin_lut table based on soil texture with the last "texture".
-                texture_is_usda_type, texture_in_kinlut, horizon_parameters = (
-                    query_kin_lut_update_horizon_parameters(df_kin_lut, texture, horizon_parameters))
+                # Step 5: get texture from texture table - this is be
+                texture = df_texture[df_texture["chtgkey"] == chtgkey_RV_Yes].texcl.values[0]
+                if texture == "None":
+                    texture = df_texture[df_texture["chtgkey"] == chtgkey_RV_Yes].lieutex.values[0]
                 
-                if not texture_is_usda_type:
-                    textures_not_usda_type.append(texture)  
+                # Step 6: Query parameters from horizon table and the kin_lut table
+                df_horizon_parameters = query_soil_horizon_parameters(row, horizon_count, max_horizons)
+                texture_is_usda_type, texture_in_kinlut, df_horizon_parameters = (
+                    query_kin_lut_update_horizon_parameters(df_kin_lut, texture, df_horizon_parameters))
 
-                if texture_in_kinlut:                     
-                    horizon_parameters["TextureGroupId"] = texture_group_id
-                    horizon_parameters["Texture"] = texture_in_group_table
-                    horizon_parameters["Texture_texcl"] = texture
-                    # The following code is from the original VB code, which assigns 
-                    # Pave = 1 when the texture is one of ["WB", "UWB", "ICE", "CEM", "IND", "GYP"].
-                    # "BR" and "CEM_BR", both of which represent bedrock in the gSSURGO_CA database, are added to the list.
-                    # "VAR", which means "variable" in the gSSURGO_CA database, is also added,
-                    # but it needs to be confirmed if Pave=1 is correct for this type.
-                    # The list could potentially be updated and expanded with applying gSSURGO database in other States.
-                    if texture_in_group_table in ["WB", "UWB", "ICE", "CEM", "IND", "GYP", "BR", "CEM_BR", "VAR"]:
-                        horizon_parameters["Pave"] = 1
-                        # When Pave=1, Sand, Clay and Silt are set to 0.33, 0.33, and 0.34, respectively. 
-                        # The values do not matter, but they need to sum to 1, so K2 can be executed.
-                        # Also, they will be excluded from the calculation of the weighted parameters.
-                        horizon_parameters["Sand"] = 0.33
-                        horizon_parameters["Clay"] = 0.33
-                        horizon_parameters["Silt"] = 0.34
-                    else:
-                        horizon_parameters["Pave"] = 0
+                if not texture_is_usda_type and texture not in textures_list_not_usda_type:
+                    textures_list_not_usda_type = textures_list_not_usda_type + [texture]
+                
+                if not texture_in_kinlut and texture not in textures_list_not_in_kinlut:
+                    textures_list_not_in_kinlut = textures_list_not_in_kinlut + [texture] 
+                
+                # Step 7: Assign Pave, Sand, Clay, and Silt for Pave textures
+                PAVE_texture_list = ["WB", "UWB", "ICE", "CEM", "IND", "GYP", "BR", "CEM_BR", "VAR"]
+                if texture_class_RV_Yes in PAVE_texture_list:
 
-                    # Update horizon_parameters with the texture group and texture
-                    df_horizon_parameters = pd.concat([df_horizon_parameters, 
-                                                       pd.DataFrame([horizon_parameters])], axis=0, ignore_index=True)
+                    df_horizon_parameters["Pave"] = 1
+                    df_horizon_parameters["Sand"] = 0.33
+                    df_horizon_parameters["Clay"] = 0.33
+                    df_horizon_parameters["Silt"] = 0.34
                 else:
-                    # Note: If the 'texture_in_kinlut_flag' is False, 
-                    # the variables SMax, CV, Distribution, and BPressure will not hold any values.
-                    # As a result, the execution of K2 will not be possible under this condition.
-                    raise Exception(f"Texture '{texture}' is not found in the AGWA lookup table. "
-                                    "Please add the texture to the lookup table.")
+                    df_horizon_parameters["Pave"] = 0
 
-    textures_not_usda_type_set = set(textures_not_usda_type)
-    textures_not_usda_string = ", ".join(textures_not_usda_type_set)
-    tweet(f"   Textures in watershed not matching the 12 standard USDA types:\n      {textures_not_usda_string}.")
-    df_weighted_by_horizon, df_weighted_by_component = calculate_weighted_hillslope_soil_parameters(df_horizon_parameters)
-    save_results(workspace, delineation_name, discretization_name, parameterization_name, save_intermediate_outputs,
-                 df_horizon_parameters_with_textures, df_horizon_parameters, df_weighted_by_horizon, 
-                 df_weighted_by_component)
+                # Step 8: Update horizon_parameters with the texture group and texture
+                df_horizon_parameters["TextureGroupChtgkey"] = chtgkey_RV_Yes
+                df_horizon_parameters["TextureClass"] = texture_class_RV_Yes
+                df_horizon_parameters["TextureDesc"] = texture_desc_RV_Yes
+                df_horizon_parameters["Texture"] = texture
+                df_horizon_parameters.insert(0, "ComponentPercentage", ComponentPercentage)
+                df_horizon_parameters.insert(0, "ComponentCokey", component_id)
+                df_horizon_parameters.insert(0, "MapUnitMukey", mukey)
+                df_horizon_parameters_all = pd.concat([df_horizon_parameters_all, 
+                                                df_horizon_parameters], axis=0, ignore_index=True)
     
-    return intersect_feature_class
+    if textures_list_not_in_kinlut:
+        textures_not_in_kinlut_string = ", ".join(textures_list_not_in_kinlut)
+        raise Exception(f"   Can not proceed because the following textures in the watershed "
+                        f"do not match any in AGWA lookup table:\n      {textures_not_in_kinlut_string}.")
+    if textures_list_not_usda_type:
+        textures_not_usda_string = ", ".join(textures_list_not_usda_type)
+        tweet(f"   Textures in watershed not matching the 12 standard USDA types:\n      {textures_not_usda_string}.")
+
+    return df_horizon_parameters_all
+
 
 
 def save_results(workspace, delineation_name, discretization_name, parameterization_name, save_intermediate_outputs,
-                df_horizon_parameters_with_textures, df_horizon_parameters, df_weighted_by_horizon,
-                df_weighted_by_component):
-    """Save the results to the workspace geodatabase. Called in parameterize function.""" 
-    # To make sure correct datatype, use insertrow instead of converting from csv to table
+                df_horizon_parameters, df_weighted_by_horizon, df_weighted_by_component):
+    """Save the results to the workspace geodatabase. Called in parameterize function.
+    To make sure the correct datatype, use insertrow instead of converting to table from csv """
     
+    df_to_save = [df_weighted_by_component]
+    table_names = ["parameters_soil_weighted_by_component"]
     if save_intermediate_outputs:
-        df_to_save = [df_horizon_parameters_with_textures, df_horizon_parameters, 
-                      df_weighted_by_horizon, df_weighted_by_component]
-        table_names = ["parameters_soil_horizons_with_textures", "parameters_soil_horizons", 
-                       "parameters_soil_weighted_by_horizon", "parameters_soil_weighted_by_component"]
-    else:
-        df_to_save = [df_weighted_by_horizon, df_weighted_by_component]
-        table_names = ["parameters_soil_weighted_by_horizon", "parameters_soil_weighted_by_component"]
-
+        df_to_save = df_to_save + [df_horizon_parameters, df_weighted_by_horizon]
+        table_names = table_names + ["parameters_soil_horizons", "parameters_soil_weighted_by_horizon"]
+   
     for df, table_name in zip(df_to_save, table_names):
         df.insert(0, "DelineationName", delineation_name)
         df.insert(1, "ParameterizationName", parameterization_name)
@@ -456,9 +505,10 @@ def save_results(workspace, delineation_name, discretization_name, parameterizat
                        AGWAGDBVersionAtCreation=config.AGWAGDB_VERSION, Status="X")
 
         # define field types. To be safe, ComponentPercentage and HorizonThickness are set to DOUBLE.
-        Text_fields = ["DelineationName", "ParameterizationName", "DiscretizationName", "CreationDate",
-                       "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation", "Status", "Texture", "Texture_texcl"]
-        Long_fields = ["MapUnitKey", "ComponentId", "HorizonId", "HorizonNumber", "TextureGroupId"]
+        Text_fields = ["DelineationName", "ParameterizationName", "DiscretizationName", "HorizonName",
+                       "Texture", "TextureClass", "TextureDesc", "CreationDate", "AGWAVersionAtCreation", 
+                       "AGWAGDBVersionAtCreation", "Status"]
+        Long_fields = ["MapUnitMukey", "ComponentCokey", "HorizonChkey", "HorizonNumber", "TextureGroupChtgkey"]
 
         # create table if not exists
         arcgis_table = os.path.join(workspace, table_name)
@@ -480,9 +530,6 @@ def save_results(workspace, delineation_name, discretization_name, parameterizat
 def query_soil_horizon_parameters(row, horizon_count, max_horizons):
     """Query soil horizon parameters. Called in intersect_soils function."""
     
-    if not (max_horizons == 0 or horizon_count <= max_horizons):
-        return pd.Series()
-
     try: 
         # calculate horizon thickness and total thickness
         horizon_id = row.chkey
@@ -506,13 +553,7 @@ def query_soil_horizon_parameters(row, horizon_count, max_horizons):
         kwfact = row.kwfact
         if kwfact == 'None':
             kwfact = 0.2 # from VB code
-        #TODO from Shea: update the reference for the following equations
-        horizon_splash = 422 * float(kwfact) * 0.8
-        if horizon_clay <= 0.22:
-            horizon_cohesion = 5.6 * float(kwfact) / (188 - (468 * horizon_clay)
-                                        + (907 * (horizon_clay ** 2))) * 0.5
-        else:
-            horizon_cohesion = 5.6 * float(kwfact) / 130 * 0.5
+
         bulk_density = row.dbthirdbar_r # dbthirdbar_r is moist bulk density
         specific_gravity = row.partdensity
         # sieve_no_10 is soil fraction passing a number 10 sieve (2.00mm square opening) as a weight
@@ -531,9 +572,10 @@ def query_soil_horizon_parameters(row, horizon_count, max_horizons):
         # rock_by_weight = ((1 - horizon_porosity) * (1 - horizon_rock)) /
         # (1 - (horizon_porosity * (1 - horizon_rock)))
 
-        new_row = {
-            "HorizonId": horizon_id,
+        horizon_parameters = {
+            "HorizonChkey": horizon_id,
             "HorizonNumber": horizon_count,
+            "HorizonName": row.hzname,
             "HorizonTopDepth": row.hzdept_r,
             "HorizonBottomDepth": row.hzdepb_r,
             "HorizonThickness": horizon_thickness,
@@ -544,16 +586,14 @@ def query_soil_horizon_parameters(row, horizon_count, max_horizons):
             "Sand": horizon_sand,
             "Silt": horizon_silt,
             "Clay": horizon_clay,
-            "kwfact": kwfact,
-            "Splash": horizon_splash,
-            "Cohesion": horizon_cohesion} # 15 parameters in total
+            "kwfact": kwfact} # 13 parameters in total
         
-        horizon_parameters = pd.DataFrame([new_row]).squeeze()
-    
     except Exception as e:
         horizon_parameters = pd.Series()
 
-    return horizon_parameters
+    df_horizon_parameters = pd.DataFrame([horizon_parameters])
+
+    return df_horizon_parameters
 
 
 def calculate_weighted_hillslope_soil_parameters(df):
@@ -561,17 +601,18 @@ def calculate_weighted_hillslope_soil_parameters(df):
     """Calculate weighted parameters for each horizon and component. 
     Return two dataframes: one for horizon and one for component.
     14 parameters get weighted in this function.
-    called in intersect_soils function. """
+    called in intersect_soils function. 
 
-    # Note: in the original code, there is check on total horizon thickness:
-    # if total_thickness == 0:
-    #     total_component_pct -= component_pct
-    #     cokey_with_missing_horizons.append(component_id)
-    # In the gSSURGO_CA database, hzdept_r seems to be always less than hzdepb_r, 
-    # therefore thickness is always positive.
-    # Similarly, comppct_r is always positive, so total_component_pct will always be positive.
-    # However, a check is added to ensure that the total thickness is not positive.
-    
+    Note: in the original code, there is check on total horizon thickness:
+    if total_thickness == 0:
+        total_component_pct -= component_pct
+        cokey_with_missing_horizons.append(component_id)
+    In the gSSURGO_CA database, hzdept_r seems to be always less than hzdepb_r, 
+    therefore thickness is always positive.
+    Similarly, comppct_r is always positive, so total_component_pct will always be positive.
+    However, a check is added to ensure that the total thickness is not positive.
+    """
+
     number_of_horizons_with_nonpositive_thickness = sum(df.HorizonThickness<0)
     if number_of_horizons_with_nonpositive_thickness > 0:
         tweet((f"Warning: {number_of_horizons_with_nonpositive_thickness} horizons have non-positive thickness."
@@ -585,7 +626,7 @@ def calculate_weighted_hillslope_soil_parameters(df):
     df = df[df.ComponentPercentage > 0]
 
     parameters = ["Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Pave", 
-                  "SMax", "CV", "Distribution", "BPressure"]
+                  "SMax", "CV", "Distribution"]
 
     df_weighted_horizon = pd.DataFrame()
     df_weighted_component = pd.DataFrame()
@@ -602,53 +643,52 @@ def calculate_weighted_hillslope_soil_parameters(df):
             weighted_par['Clay'] /= total_particle            
         return pd.DataFrame([weighted_par])
         
-    for mukey in df.MapUnitKey.unique():
-        df_soil = df[df.MapUnitKey == mukey]
-        for component_id in df.ComponentId.unique():
-            df_component = df_soil[df_soil.ComponentId == component_id]
-            for horizon_id in df_component.HorizonId.unique():
-                df_horizon = df_component[df_component.HorizonId == horizon_id]
+    for mukey in df.MapUnitMukey.unique():
+        df_soil = df[df.MapUnitMukey == mukey]
+        for component_id in df.ComponentCokey.unique():
+            df_component = df_soil[df_soil.ComponentCokey == component_id]
+            for horizon_id in df_component.HorizonChkey.unique():
+                df_horizon = df_component[df_component.HorizonChkey == horizon_id]
                 df_weighted_values = weight_parameters(df_horizon, "HorizonThickness")
-                df_weighted_values.insert(0, "MapUnitKey", mukey)
-                df_weighted_values.insert(1, "ComponentId", component_id)
-                df_weighted_values.insert(2, "HorizonId", horizon_id)
+                df_weighted_values.insert(0, "MapUnitMukey", mukey)
+                df_weighted_values.insert(1, "ComponentCokey", component_id)
+                df_weighted_values.insert(2, "HorizonChkey", horizon_id)
                 df_weighted_values.insert(3, "TotalHorizonThickness", df_horizon["HorizonThickness"].sum())                
                 df_weighted_values.insert(4, "ComponentPercentage", df_horizon["ComponentPercentage"].values[0])
                 df_weighted_horizon = pd.concat([df_weighted_horizon, df_weighted_values], axis=0, ignore_index=True)
     
-    for mukey in df_weighted_horizon.MapUnitKey.unique():
-        df_component = df_weighted_horizon[df_weighted_horizon.MapUnitKey == mukey]
+    for mukey in df_weighted_horizon.MapUnitMukey.unique():
+        df_component = df_weighted_horizon[df_weighted_horizon.MapUnitMukey == mukey]
         df_weighted_values = weight_parameters(df_component, "ComponentPercentage")
-        df_weighted_values.insert(0, "MapUnitKey", mukey)
+        df_weighted_values.insert(0, "MapUnitMukey", mukey)
         df_weighted_values.insert(1, "TotalComponentPercentage", df_component["ComponentPercentage"].sum())   
         df_weighted_component = pd.concat([df_weighted_component, df_weighted_values], axis=0, ignore_index=True)
     
     return df_weighted_horizon, df_weighted_component
 
 
-def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, horizon_parameters):  
+def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, df_horizon_parameters):  
     """This function queries 'kin' parameters and updates 'horizon' values. 
         It is called within the 'intersect_soils' function.
         Additionally, it computes 'cohesion' based on the 'clay' values from the 'kin_lut' table.
         Note: the 'kin_lut' table is prioritized over the SSURGO 'chorizon' table."""
 
+    # check if the texture is in the USDA standard texture list, or in the kin_lut table
     texture_is_usda_standard = True
     texture_is_in_kin_lut = True
-
-    kin_par = df_kin_lut[df_kin_lut.TextureName == texture].squeeze()
     usda_standard_texture_lower = ["clay", "clay loam", "loam", "loamy sand", "sand", "sandy clay", 
-                    "sandy clay loam", "sandy loam", "silt", "silt loam", "silty clay", "silty clay loam"]
+            "sandy clay loam", "sandy loam", "silt", "silt loam", "silty clay", "silty clay loam"]
     if texture.lower() not in usda_standard_texture_lower:
         texture_is_usda_standard = False
 
+    kin_par = df_kin_lut[df_kin_lut.TextureName == texture].squeeze()
     if kin_par.empty: 
         texture_is_in_kin_lut = False
         # this means the texture type from SSURGO is not found in the kin_lut table
-        # in this case, there won't be values for SMax, CV, Distribution, and BPressure
-        return texture_is_usda_standard, texture_is_in_kin_lut, horizon_parameters
+        # in this case, there won't be values for SMax, CV, Distribution
+        return texture_is_usda_standard, texture_is_in_kin_lut, df_horizon_parameters
 
-
-    # 13 parameters from kin_lut table
+    # parameters from kin_lut table
     kin_ksat = kin_par.KS
     kin_g = kin_par.G
     kin_porosity = kin_par.POR
@@ -659,11 +699,10 @@ def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, horizon_paramet
     kin_clay = kin_par.CLAY/100
     kin_distribution = kin_par.DIST
     kin_kff = kin_par.KFF  # used to calculate cohesion
-    kin_bpressure = kin_par.BPressure  # need to confirm with Shea, the purpose of this parameter
 
     # TODO from Shea: document the splash and cohesion equations by adding references    
-    # calculate cohesion based on kff (kwfact). modify if kf is 0 or kin_kff is negative
-    kf = float(horizon_parameters["kwfact"])
+    # calculate splash based on kff (kwfact). modify if kf is 0 or kin_kff is negative
+    kf = float(df_horizon_parameters["kwfact"])    
     if kf == 0:
         if kin_kff <= 0:
             kf = 0.2
@@ -672,37 +711,33 @@ def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, horizon_paramet
     splash = 422 * float(kf) * 0.8
 
     # calculate cohension
-    # option 1: calculate cohesion based on clay content from SSURGO chorizon table
-    if False: # use option 2
-        if math.isnan(horizon_parameters["Clay"]):
-            clay = kin_clay
-        else:
-            clay = horizon_parameters["Clay"]
-    # option 2: calculate cohesion based on clay content from kin_lut
-    clay = kin_clay
-
+    if kin_clay is None and df_horizon_parameters["Clay"] is not None:
+            clay = df_horizon_parameters["Clay"]
+    else:
+        clay = kin_clay
     if clay <= 0.22:
         cohesion = 5.6 * kf / (188 - (468 * clay) + (907 * (clay ** 2))) * 0.5
     else:
         cohesion = 5.6 * kf / 130 * 0.5
 
-    # The following 8 parameters are computable from SSURGO
-    # Use values from kin_lut unless parameter from kin_lut is null
+    # Parameters that can be sourced from either SSURGO or kin_lut, use kin_lut if available
     kin_values_to_use = {"Ksat": kin_ksat, "G": kin_g, "Sand": kin_sand,
-                         "Silt": kin_silt, "Clay": kin_clay, "Splash": splash,
-                         "Cohesion": cohesion, "Porosity": kin_porosity}
+                         "Silt": kin_silt, "Clay": kin_clay, "Porosity": kin_porosity}
     for key, value in kin_values_to_use.items():
         if value is not None and not math.isnan(value):
-            horizon_parameters[key] = value
+            df_horizon_parameters[key] = value
 
-    # the following 4 parameters are not computable from SSURGO, so they must come from kin_lut
-    # these are required parameters for KINEROS2
-    kin_values_to_add ={"SMax": kin_smax, "CV": kin_cv, 
-                        "Distribution": kin_distribution, "BPressure": kin_bpressure}        
+    # Calculated parameters
+    calculated_values = {"Splash": splash, "Cohesion": cohesion}
+    for key, value in calculated_values.items():
+        df_horizon_parameters[key] = value
+
+    # Parameters that must come from kin_lut (required for KINEROS2)
+    kin_values_to_add = {"SMax": kin_smax, "CV": kin_cv, "Distribution": kin_distribution}        
     for key, value in kin_values_to_add.items():
-        horizon_parameters[key] = value
+        df_horizon_parameters[key] = value
     
-    return texture_is_usda_standard, texture_is_in_kin_lut, horizon_parameters
+    return texture_is_usda_standard, texture_is_in_kin_lut, df_horizon_parameters
 
 
 def weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, discretization_name,
@@ -724,16 +759,16 @@ def weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, di
                                                                ["HillslopeID", "MUKEY", "Shape_Area"])) 
 
     # Step 2: Merge intersection polygons with soils
-    df_soils.MapUnitKey = df_soils.MapUnitKey.astype(str)
+    df_soils.MapUnitMukey = df_soils.MapUnitMukey.astype(str)
     df_intersections.MUKEY = df_intersections.MUKEY.astype(str)
     # here to assign values so it won't be NaN #TODO: add a warning or error if there are missing_mukeys
-    missing_mukeys = df_intersections[~df_intersections["MUKEY"].isin(df_soils["MapUnitKey"])].MUKEY.unique()
+    missing_mukeys = df_intersections[~df_intersections["MUKEY"].isin(df_soils["MapUnitMukey"])].MUKEY.unique()
     
-    df_intersections_soils = pd.merge(df_intersections, df_soils, left_on="MUKEY", right_on="MapUnitKey", how="left")
+    df_intersections_soils = pd.merge(df_intersections, df_soils, left_on="MUKEY", right_on="MapUnitMukey", how="left")
     
     # Step 3: Weight soil parameters by area fractions
     parameters = ["Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Pave",
-                   "SMax", "CV", "Distribution", "BPressure"]
+                   "SMax", "CV", "Distribution"]
     df_weighted_by_area = pd.DataFrame().assign(HillslopeID=df_intersections_soils.HillslopeID.unique())
     for hillsope_id in df_intersections_soils.HillslopeID.unique():
         df_hillslope = df_intersections_soils[df_intersections_soils.HillslopeID == hillsope_id]
@@ -798,11 +833,10 @@ def copy_parameterization(workspace, delineation_name, discretization_name, prev
     tables = ["parameters_hillslopes", "parameters_channels"]
     index_fields = ["HillslopeID", "ChannelID"]
     hillslope_fields_copy = ["Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", 
-                             "Pave", "SMax", "CV", "Distribution", "BPressure", "Canopy", "Interception", 
+                             "Pave", "SMax", "CV", "Distribution", "Canopy", "Interception", 
                              "Manning", "Imperviousness"]
     channel_feilds_copy = ["Ksat", "Manning", "Pave", "Imperviousness", "SMax", "CV", "G", "Porosity", 
-                           "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Distribution", 
-                           "BPressure", "Woolhiser"]
+                           "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Distribution", "Woolhiser"]
 
     
     for table, fields_to_copy, index_field in zip(tables, [hillslope_fields_copy, channel_feilds_copy], 

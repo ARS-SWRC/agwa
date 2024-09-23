@@ -7,6 +7,7 @@ import code_parameterize_land_cover_and_soils as agwa
 importlib.reload(agwa)
 
 
+
 class ParameterizeLandCoverAndSoils(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -256,6 +257,7 @@ class ParameterizeLandCoverAndSoils(object):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
         
+        
         # Check if element parameterization has been performed
         delineation_name = parameters[0].valueAsText
         discretization_name = parameters[1].valueAsText
@@ -312,6 +314,18 @@ class ParameterizeLandCoverAndSoils(object):
             if len(channel_type_list) == 0:
                 parameters[0].setErrorMessage("Missing metaWorkspace table in this project content. Please add or run Step 1 to create.")
 
+
+        if parameters[9].value is not None:
+            max_horizons = int(parameters[9].value)
+            if max_horizons < 1:
+                parameters[9].setErrorMessage("Maximum number of horizons must be at least 1.")
+
+        if parameters[10].value is not None:
+            max_thickness = float(parameters[10].value)
+            if max_thickness <= 0:
+                parameters[10].setErrorMessage("Maximum soil depth must be greater than 0.")
+
+    
         return
 
 
