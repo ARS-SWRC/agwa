@@ -38,8 +38,8 @@ class ExecuteK2Simulation(object):
                                  parameterType="Required",
                                  direction="Input")
 
-        param2 = arcpy.Parameter(displayName="Simulation",
-                                 name="Simulation",
+        param2 = arcpy.Parameter(displayName="Simulation Name",
+                                 name="Simulation_Name",
                                  datatype="GPString",
                                  parameterType="Required",
                                  direction="Input")

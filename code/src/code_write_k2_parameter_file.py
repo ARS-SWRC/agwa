@@ -13,7 +13,7 @@ def tweet(msg):
     print(arcpy.GetMessages())
 
 
-def initialize_workspace(prjgdb, delineation, discretization, parameterization, parameterization_file_path):
+def initialize_workspace(prjgdb, delineation, discretization, parameterization, parameterization_file_path, overwrite):
     """Initialize the workspace for writing K2 parameter file for AGWA."""
     
     tweet("Cheking if the metaParameterization table exists")
@@ -37,17 +37,22 @@ def initialize_workspace(prjgdb, delineation, discretization, parameterization, 
         tweet(f"Creating table '{meta_parameterization_file_table}'")
         arcpy.CreateTable_management(prjgdb, "metaParameterizationFile")
         for field in fields:
-            arcpy.AddField_management(meta_parameterization_file_table, field, "TEXT")   
-    
+            arcpy.AddField_management(meta_parameterization_file_table, field, "TEXT")    
+   
     tweet("Checking if the parameterization file name already exists")
-    df_parameterization_file = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_parameterization_file_table, fields))
-    if parameterization_file_path in df_parameterization_file.ParameterizationFilePath.values:
-        raise Exception(f"The choosen parameterization file name already exists.")
-
-    tweet("Documenting parameterization file parameters to metadata")
-    with arcpy.da.InsertCursor(meta_parameterization_file_table, fields) as cursor:
-        cursor.insertRow((delineation, discretization, parameterization, parameterization_file_path,
-                          datetime.now().isoformat()))
+    df_parameterization_file = pd.DataFrame(
+        arcpy.da.TableToNumPyArray(meta_parameterization_file_table, fields))
+    existing = df_parameterization_file.ParameterizationFilePath.str.lower().values
+    if parameterization_file_path.lower() in existing:
+        if not overwrite:
+            raise Exception("The chosen parameterization file name already exists. "
+                            "Check 'Overwrite Existing Parameter File' to replace it.")
+        tweet("Overwriting existing parameterization file; replacing its metadata record")
+        with arcpy.da.UpdateCursor(meta_parameterization_file_table,
+                                   ["ParameterizationFilePath"]) as cursor:
+            for row in cursor:
+                if row[0].lower() == parameterization_file_path.lower():
+                    cursor.deleteRow()
 
     tweet("Adding MetaParameterizationFile table to the map")
     aprx = arcpy.mp.ArcGISProject("CURRENT")
@@ -130,15 +135,16 @@ def write_file(output_file, agwa_version_at_creation, agwa_gbd_version_at_creati
             tweet(f"WARNING: Hillslope {channel_id - 1} not found from discretization. ")
 
         # get upland ID
-        up_hillslope = [channel_id - 3]
-        if up_hillslope in df_hillslopes .HillslopeID.values:
-            up_hillslopes = up_hillslope + lat_id
+        up_hillslope = channel_id - 3
+
+        if up_hillslope in df_hillslopes.HillslopeID.values:
+            up_hillslopes = [up_hillslope] + lat_id
             up_id = [up_hillslope]
         else:
             up_hillslopes = lat_id
             up_id = df_contributing_channels.loc[
                 df_contributing_channels.ChannelID == f"{channel_id}", "ContributingChannel"].values
-
+                
         # write hillslope parameters        
         for hillslope_id in up_hillslopes:
             if hillslope_id in df_hillslopes.HillslopeID.values:
@@ -190,7 +196,7 @@ def write_hillslope(plane_id, par_name, df_hilllslopes):
 
     # write hillslope
     plane_info = ("BEGIN PLANE\n"
-                    f"  ID = {plane_id}, PRINT = 3, FILE = hillslopes\hillslope_{plane_id}.sim\n"
+                    f"  ID = {plane_id}, PRINT = 3, FILE = hillslopes\\hillslope_{plane_id}.sim\n"
                     f"  LEN = {length:.4f}, WID = {width:.4f}\n"
                     f"  SLOPE = {slope:.4f}\n"
                     f"  MAN = {man:.4f}, X = {x}, Y = {y}\n"
@@ -229,7 +235,7 @@ def write_channel(channel_id, up_id, lat_id, par_name, df_channels):
     down_depth, up_depth = channel_parameters.DownstreamBankfullDepth, channel_parameters.UpstreamBankfullDepth
 
     channel_info = (f"BEGIN CHANNEL\n"
-                    f"  ID = {channel_id}, PRINT = 3, FILE = channels\chan_{channel_id}.sim\n"
+                    f"  ID = {channel_id}, PRINT = 3, FILE = channels\\chan_{channel_id}.sim\n"
                     f"  LAT =  {lat_id_str}\n"
                     f"  UP =  {up_id_str}\n"
                     f"  LEN = {length:.4f}, SLOPE = {slope:.4f}, X = {x:.4f}, Y = {y:.4f}\n"

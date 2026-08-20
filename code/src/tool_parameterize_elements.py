@@ -109,7 +109,7 @@ class ParameterizeElements(object):
                                  direction="Input")
 
         params = [param0, param1, param2, param3, param4, param5, param6, param7, param8, param9,
-                   param10, param11]
+                  param10, param11]
 
         return params
 
@@ -119,7 +119,7 @@ class ParameterizeElements(object):
 
     def updateParameters(self, parameters):
         """Modify the values and properties of parameters before internal
-        validation is performed.  This method is called whenever a parameter
+        validation is performed. This method is called whenever a parameter
         has been changed."""
 
         # get the discretization list, workspace and AGWA directory from meta tables
@@ -164,7 +164,7 @@ class ParameterizeElements(object):
                 for param in parameters[4:8]:
                     param.enabled = False
                 previouse_parameterization_list = self.get_previous_element_parameterization(prjgdb, workspace, delineation_name,
-                                                                                             discretization_name)
+                                                                                            discretization_name)
                 if len(previouse_parameterization_list) != 0:
                     parameters[3].enabled = True
                     parameters[3].filter.list = previouse_parameterization_list
@@ -173,7 +173,7 @@ class ParameterizeElements(object):
                 else:
                     parameters[3].enabled = True
                     parameters[3].setErrorMessage(f"No previous element parameterizations found for the selected "
-                                            "delineation and discretization.===")                    
+                                            "delineation and discretization.")                    
             else:
                 parameters[3].enabled = False
                 for param in parameters[4:8]:
@@ -215,11 +215,10 @@ class ParameterizeElements(object):
         parameters[7].filter.list = hgr_list
 
         return
-    
 
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
-        parameter.  This method is called after internal validation."""
+        parameter. This method is called after internal validation."""
 
         if parameters[0].value and parameters[1].value:
             delineation_name = parameters[0].valueAsText
@@ -227,23 +226,25 @@ class ParameterizeElements(object):
             workspace = parameters[9].valueAsText
             prjgdb = parameters[10].valueAsText
             previouse_parameterization_list = self.get_previous_element_parameterization(prjgdb, workspace,
-                                                                                         delineation_name, discretization_name)
+                                                                                        delineation_name, discretization_name)
             if parameters[2].value:
                 if len(previouse_parameterization_list) == 0:
                     parameters[3].setErrorMessage(f"No previous element parameterizations found for the selected "
                                             "delineation and discretization.")
 
-            if parameters[8].value:
-                parameterization_name = parameters[8].valueAsText
-                if parameterization_name in previouse_parameterization_list:
-                    parameters[8].setErrorMessage(f"Parameterization name '{parameterization_name}' already "
-                                            "exists for the selected delineation and discretization. Please "
-                                            "choose a different name.")
-                    
-                parameterization_name = parameterization_name.strip()
-                if re.match("^[A-Za-z][A-Za-z0-9_]*$", parameterization_name) is None:
-                    parameters[8].setErrorMessage("The paramterization name must start with a letter and contain only letters, "
-                                                  "numbers, and underscores.")
+        if parameters[8].value:
+            parameterization_name = parameters[8].valueAsText
+            
+            # Use setWarningMessage to flag a warning without blocking execution
+            if parameterization_name in previouse_parameterization_list:
+                parameters[8].setWarningMessage(f"Parameterization name '{parameterization_name}' already "
+                                                "exists for the selected delineation and discretization. "
+                                                "Executing will overwrite previous results.")
+                
+            parameterization_name = parameterization_name.strip()
+            if re.match("^[A-Za-z][A-Za-z0-9_]*$", parameterization_name) is None:
+                parameters[8].setErrorMessage("The parameterization name must start with a letter and contain only letters, "
+                                            "numbers, and underscores.")
 
         # Check if the metaDiscretization table is added to the project content
         discretization_list = parameters[1].filter.list
@@ -259,54 +260,69 @@ class ParameterizeElements(object):
                 parameters[0].setErrorMessage("Missing metaWorkspace table in this project content. "
                                               "Please add or run Step 1 to create.")
 
-        
         if parameters[0].value == None and parameters[6].altered:
             add_hgr_map = parameters[6].value
             if add_hgr_map:
                 parameters[6].setErrorMessage("Please select a delineation before viewing the map.")      
-               
+                
         return
 
-
     def get_previous_element_parameterization(self, prjgdb, workspace, delineation_name, discretization_name):
-        """Get the list of previous element parameterizations for the selected delineation and discretization."""
-
+        """Get the list of previous element parameterizations."""
         parameterization_list = []
 
-        # get parameterization names from the metaParameterization table
-        meta_parameterization_table = os.path.join(prjgdb, "metaParameterization")
-        if arcpy.Exists(meta_parameterization_table):
-            with arcpy.da.SearchCursor(meta_parameterization_table, 
-                                       ["DelineationName", "DiscretizationName", "ParameterizationName", "SlopeType"]) as cursor:
-                for row in cursor:
-                    if (row[0] == delineation_name) and (row[1] == discretization_name) and (row[3] != ""):
-                        parameterization_list.append(row[2])
-        
-        # get parameterization names from the parameter tables
-        parameters_hillslope_table = os.path.join(workspace, "parameters_hillslopes")
-        if arcpy.Exists(parameters_hillslope_table):
-            with arcpy.da.SearchCursor(parameters_hillslope_table,
-                                       ["DelineationName", "DiscretizationName", "ParameterizationName"]) as cursor:
-                for row in cursor:
-                    if (row[0] == delineation_name) and (row[1] == discretization_name):
-                        if row[2] not in parameterization_list:
-                            parameterization_list.append(row[2])
+        def has_fields(table_path, required_fields):
+            """Helper to verify that a table exists and contains all required fields."""
+            if not arcpy.Exists(table_path):
+                return False
+            try:
+                existing_fields = {f.name for f in arcpy.ListFields(table_path)}
+                return all(field in existing_fields for field in required_fields)
+            except Exception:
+                return False
 
-        parameters_channel_table = os.path.join(workspace, "parameters_channels")
-        if arcpy.Exists(parameters_channel_table):
-            with arcpy.da.SearchCursor(parameters_channel_table,
-                                       ["DelineationName", "DiscretizationName", "ParameterizationName"]) as cursor:
-                for row in cursor:
-                    if (row[0] == delineation_name) and (row[1] == discretization_name):
-                        if row[2] not in parameterization_list:
-                            parameterization_list.append(row[2])
+        # 1. Check meta_parameterization_table , slope is required here beside other three
+        meta_table = os.path.join(prjgdb, "metaParameterization") if prjgdb else ""
+        req_meta_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "SlopeType"]
+        if has_fields(meta_table, req_meta_fields):
+            try:
+                with arcpy.da.SearchCursor(meta_table, req_meta_fields) as cursor:
+                    for row in cursor:
+                        if (row[0] == delineation_name) and (row[1] == discretization_name) and row[3]:
+                            if row[2] and row[2] not in parameterization_list:
+                                parameterization_list.append(row[2])
+            except Exception as e:
+                arcpy.AddWarning(f"Could not read metaParameterization: {e}")
+
+        # 2. Check parameters_hillslopes table
+        hillslope_table = os.path.join(workspace, "parameters_hillslopes") if workspace else ""
+        req_param_fields = ["DelineationName", "DiscretizationName", "ParameterizationName"]
+        if has_fields(hillslope_table, req_param_fields):
+            try:
+                with arcpy.da.SearchCursor(hillslope_table, req_param_fields) as cursor:
+                    for row in cursor:
+                        if (row[0] == delineation_name) and (row[1] == discretization_name):
+                            if row[2] and row[2] not in parameterization_list:
+                                parameterization_list.append(row[2])
+            except Exception as e:
+                arcpy.AddWarning(f"Could not read parameters_hillslopes: {e}")
+
+        # 3. Check parameters_channels table
+        channel_table = os.path.join(workspace, "parameters_channels") if workspace else ""
+        if has_fields(channel_table, req_param_fields):
+            try:
+                with arcpy.da.SearchCursor(channel_table, req_param_fields) as cursor:
+                    for row in cursor:
+                        if (row[0] == delineation_name) and (row[1] == discretization_name):
+                            if row[2] and row[2] not in parameterization_list:
+                                parameterization_list.append(row[2])
+            except Exception as e:
+                arcpy.AddWarning(f"Could not read parameters_channels: {e}")
 
         return parameterization_list
 
-
     def execute(self, parameters, messages):
         """The source code of the tool."""
-        # arcpy.AddMessage("Toolbox source: " + os.path.dirname(__file__))
         arcpy.AddMessage("Script source: " + __file__)
         delineation_name = parameters[0].valueAsText            
         discretization = parameters[1].valueAsText
@@ -331,13 +347,12 @@ class ParameterizeElements(object):
         
         if use_previous:
             agwa.copy_parameterization(workspace, delineation_name, discretization, parameterization_name,
-                          previous_parameterization)
+                                      previous_parameterization)
         else:
             agwa.parameterize(prjgdb, workspace, delineation_name, discretization, parameterization_name,
-                          save_intermediate_outputs)
+                               save_intermediate_outputs)
 
         return
-    
 
     def postExecute(self, parameters):
         """This method takes place after outputs are processed and

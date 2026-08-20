@@ -9,9 +9,58 @@ import sys
 import subprocess
 from datetime import datetime
 
-# Global Variables
-# Extension of the raster outputs
-_ras_ext = ".tif"  # TODO: Is .tif okay?
+_ras_ext = ".tif"
+
+
+def raster_ext(workspace):
+    # Returns the raster extension appropriate for the given output workspace.
+    # Geodatabase rasters have no extension; file system folders use _ras_ext.
+    # workspace - string - path to the output folder or geodatabase
+    try:
+        return "" if arcpy.Describe(workspace).workspaceType == "LocalDatabase" else _ras_ext
+    except Exception:
+        return _ras_ext
+
+
+# Severity class codes expected by create_burn_severity_lc. 
+_severity_codes = {"unburned": 1, "low": 2, "moderate": 3, "high": 4}
+
+
+def severity_code_field(in_feature, field, scratch):
+    # Returns a (feature, field) pair whose values are the numeric severity codes above.
+    # Numeric fields are used as-is. Text fields are translated into a temporary copy so that
+    # cell values come from the severity classes themselves rather than from row numbering.
+    # in_feature - string - path and name of the burn severity feature class
+    # field - string - the field that stores the severity value
+    # scratch - string - workspace for the temporary copy, if one is needed
+    field_list = arcpy.ListFields(in_feature, field)
+    if len(field_list) != 1:
+        stop_execution(f"Error in function severity_code_field - field {field} not found.")
+    if field_list[0].type in ("SmallInteger", "Integer", "BigInteger", "Single", "Double"):
+        return in_feature, field
+
+    # Severity field is text,  convert to numeric codes
+    temp_feature = f"{scratch}\\{arcpy.Describe(in_feature).baseName}_sev.shp"
+    try:
+        arcpy.management.CopyFeatures(in_feature, temp_feature)
+        arcpy.management.AddField(temp_feature, "SEVCODE", "SHORT")
+        unmatched = set()
+        with da.UpdateCursor(temp_feature, [field, "SEVCODE"]) as u_cursor:
+            for u_row in u_cursor:
+                severity_text = str(u_row[0]).strip().lower()
+                if severity_text not in _severity_codes:
+                    unmatched.add(u_row[0])
+                u_row[1] = _severity_codes.get(severity_text, 0)
+                u_cursor.updateRow(u_row)
+    except Exception as e:
+        tweet("Error: Unable to translate severity classes to numeric codes.", True)
+        tweet(f"Exception message: {e}", True)
+        stop_execution("Error in function severity_code_field - translating severity classes.")
+
+    if unmatched:
+        tweet(f"Warning: severity values {sorted(unmatched)} were not recognized and will be "
+              f"treated as unburned. Expected values are {sorted(_severity_codes)}.", True)
+    return temp_feature, "SEVCODE"
 
 
 def stop_execution(msg):
@@ -198,18 +247,26 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
     # burn_severity_field - string - the field that stores the severity value
     # lc - string - path & name of the land cover to be modified
     # change_table - string - NLCD burn severity look-up table
-    # output_folder - string - path to folder where outputs will be created
+    # output_folder - string - path to the folder or geodatabase where outputs will be created
     # new_name - string - name of the new lad cover raster that is created
 
     # Step 1: Set Environment properties
     try:
         arcpy.env.extent = lc
+        arcpy.env.snapRaster = lc
+        arcpy.env.cellSize = arcpy.Raster(lc).meanCellWidth
         arcpy.env.workspace = output_folder
         arcpy.env.overwriteOutput = True
     except Exception as e:
         tweet(f"Error: Unable to set environment properties.", True)
         tweet(f"Exception message: {e}", True)
         stop_execution("Error in function BurnSeverity - Step 1: Setting environment extent.")
+
+    # Resolve the output raster extension. Intermediates are always created in a file system
+    # workspace so that rasterization of the burn severity map is identical regardless of the
+    # final output format; only the final land cover raster honors the output workspace.
+    ext = raster_ext(output_folder)
+    scratch = output_folder if ext else arcpy.env.scratchFolder
 
     # Step 2: Check if the Burn Severity Map is a raster or feature class/shapefile
     # If the map is a feature class/shapefile, it must be converted to a raster.
@@ -220,15 +277,13 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
     if hasattr(burn_describe, "dataType"):
         burn_data_type = burn_describe.dataType
         if burn_data_type == "FeatureLayer" or burn_data_type == "FeatureClass" or burn_data_type == "ShapeFile":
-            # Dissolve and convert the feature class to a raster for geoprocessing
-            in_feature = burn_severity_map
-            field = burn_severity_field
-            dissolve_out = f"{output_folder}\\{burn_describe.name[:-4]}_dissolve.shp"
-            out_raster = f"{output_folder}\\{burn_describe.name[:-4]}_ras{_ras_ext}"
-            # Call the function to dissolve and convert the feature to a raster
-            feature_to_raster(in_feature, field, out_raster, dissolve_out)
+            in_feature, field = severity_code_field(burn_severity_map, burn_severity_field, scratch)
+            out_raster = f"{scratch}\\{burn_describe.baseName}_ras{_ras_ext}"
+            # Call the function to convert the feature to a raster
+            feature_to_raster(in_feature, field, out_raster)
             burn_severity_raster = out_raster
 
+       
     # Step 3: Execute the IsNull tool
     # The ISNull converts all NoData values in the burn map to 1 and all other values to 0
     try:
@@ -284,12 +339,10 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
             continue
     tweet("Burn Severity table fields successfully verified!")
 
-    # Following variables will be used later in the code
-    severity = -99
     expression_start = ""
     expression_end = ""
+    unrecognized = set()
 
-    # Open the Change Table using a Search Cursor
     tweet("Creating con expression for RasterCalculator tool ... ")
     try:
         with da.SearchCursor(change_table, burn_severity_fields) as s_cursor:
@@ -300,15 +353,13 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
                 severity_string = s_row[1]
                 post_burn_value = s_row[2]
 
-                # Convert severity from string to integer
-                if severity_string == "low":
-                    severity = 2
-                elif severity_string == "moderate":
-                    severity = 3
-                elif severity_string == "high":
-                    severity = 4
-                else:
-                    severity = -99
+                # Convert severity from string to integer using the same codes that
+                # severity_code_field writes into the burn severity raster
+                severity = _severity_codes.get(str(severity_string).strip().lower(), -99)
+                if severity == -99:
+                    # Unrecognized severity class, skip the row and report it after the loop
+                    unrecognized.add(severity_string)
+                    continue
 
                 # Create expression based on the current row in the change table
                 # Example: Con((lc == 41.0) & (bslc == 2), 410.0
@@ -320,6 +371,16 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
         tweet("Error: Setting up search cursor on the look-up table.", True)
         tweet(f"Exception message: {e}", True)
         stop_execution("Error in function BurnSeverity - Step 5: Creating RasterCalculator expression.")
+
+    # Report any rows that were skipped
+    if unrecognized:
+        tweet(f"Warning: severity values {sorted(unrecognized)} in the change table were not "
+              f"recognized and those rows were skipped. Expected {sorted(_severity_codes)}.", True)
+
+    # If no rows were usable the expression collapses to lc and the output would be an
+    # unmodified copy of the input land cover
+    if expression_start == "":
+        stop_execution("Error in function BurnSeverity - Step 5: no usable rows in the change table.")
 
     # Inputs for RasterCalculator tool
     expression = f'{expression_start}lc{expression_end}'
@@ -343,13 +404,13 @@ def create_burn_severity_lc(burn_severity_map, burn_severity_field, lc, change_t
         # Step 7: Save the output raster
         try:
             tweet(f"Saving output land cover raster ...")
-            output_lc.save(f"{output_folder}/{new_name}{_ras_ext}")
+            output_lc.save(f"{output_folder}\\{new_name}{ext}")
         except Exception as e:
             tweet("Error: Unable to save raster.", True)
             tweet(f"Exception message: {e}", True)
             stop_execution("Error in function BurnSeverity - Step 7: Save output raster.")
         else:
-            tweet(f"Output Land Cover raster saved at: {output_folder}\\{new_name}{_ras_ext}")
+            tweet(f"Output Land Cover raster saved at: {output_folder}\\{new_name}{ext}")
 
     return output_lc
 
@@ -365,8 +426,9 @@ def change_entire_polygon(lc_raster, polygon, output_folder, new_name, lc_lut, l
 
     # Step 1: Set Environment properties
     try:
+        # Align the cells to the land cover grid
         arcpy.env.extent = lc_raster
-        arcpy.env.snapRaster = lc_raster  # Align the cells to the land cover grid
+        arcpy.env.snapRaster = lc_raster  
         arcpy.env.workspace = output_folder
         arcpy.env.overwriteOutput = True
     except Exception as e:
@@ -1095,6 +1157,3 @@ def create_patchy_fractal_surface(lc_raster, polygon, output_folder, new_name, l
 
 if __name__ == '__main__':
     pass
-
-# TODO:
-#   - Code for entire and change selected works error free, but output is not as expected, neither in UI.

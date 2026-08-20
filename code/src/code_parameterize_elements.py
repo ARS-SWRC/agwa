@@ -20,31 +20,49 @@ def tweet(msg):
     arcpy.AddMessage(m)
     print(m)
 
+def delete_existing_records(table_path, delineation_name, discretization_name, parameterization_name):
+    """Safely removes existing matching records from a table if it exists and has the required fields."""
+    if not arcpy.Exists(table_path):
+        return
+
+    req_fields = ["DelineationName", "DiscretizationName", "ParameterizationName"]
+    existing_fields = {f.name for f in arcpy.ListFields(table_path)}
+    if not set(req_fields).issubset(existing_fields):
+        return
+
+    expression = (
+        f"DelineationName = '{delineation_name}' AND "
+        f"DiscretizationName = '{discretization_name}' AND "
+        f"ParameterizationName = '{parameterization_name}'"
+    )
+    with arcpy.da.UpdateCursor(table_path, ["OID@"], expression) as cursor:
+        for _ in cursor:
+            cursor.deleteRow()
+
 
 def initialize_workspace(delineation_name, prjgdb, discretization_name, parameterization_name,
                          slope_method, flow_length_method, hgr_method):
-    """Initialize the workspace by creating the metaParameterization table and writing the user's inputs to it."""
+    """Initialize the workspace by creating/cleaning metaParameterization and writing the user's inputs."""
 
     tweet("Checking metaDiscretization table")
 
-    # check if the metaDiscretization table exists, if not raise an exception
     meta_discretization_table = os.path.join(prjgdb, "metaDiscretization")
     if not arcpy.Exists(meta_discretization_table):
         raise Exception(f"The table 'metaDiscretization' does not exist in the workspace {prjgdb}."
                         "Please run Step 3 first.")
     
-    df = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_discretization_table, ["DelineationName", "DiscretizationName"]))
-    df = df[(df['DelineationName']==delineation_name) & (df['DiscretizationName'] == discretization_name)]
+    df = pd.DataFrame(arcpy.da.TableToNumPyArray(
+        meta_discretization_table, ["DelineationName", "DiscretizationName"]))
+    df = df[(df['DelineationName'] == delineation_name) &
+            (df['DiscretizationName'] == discretization_name)]
     if df.empty:
         msg = (f"Cannot proceed. \nThe table 'metaDiscretization' returned 0 records with field "
                f"'DiscretizationName' equal to '{discretization_name}'.")
         tweet(msg)
         raise Exception(msg)
 
-
     tweet("Documenting user's input to metaParameterization table")
 
-    # define the fields and values to write to the table
     fields = ["DelineationName", "DiscretizationName", "ParameterizationName", 
               "SlopeType", "FlowLengthMethod", "HydraulicGeometryRelationship",
               "ChannelType", "LandCoverPath", "LandCoverLookUpTablePath",
@@ -56,50 +74,47 @@ def initialize_workspace(delineation_name, prjgdb, discretization_name, paramete
                 "", "", "", "", "", "", "",
                 datetime.datetime.now().isoformat(), config.AGWA_VERSION, config.AGWAGDB_VERSION, "X"]        
                 
-    # Create metaParameterization table if it doesn't exist
     meta_parameterization_table = os.path.join(prjgdb, "metaParameterization")
+
+    if arcpy.Exists(meta_parameterization_table):
+        delete_existing_records(meta_parameterization_table,
+                                delineation_name, discretization_name, parameterization_name)
+
     if not arcpy.Exists(meta_parameterization_table):
         tweet("Creating metaParameterization table")
         arcpy.CreateTable_management(prjgdb, "metaParameterization") 
         for field in fields:
             arcpy.AddField_management(meta_parameterization_table, field, "TEXT")
-    else:
-        # check if the parameterization already exists in the table (this is checked in the GUI before this function is called)
-        df = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_parameterization_table, 
-                                                     ["DelineationName", "DiscretizationName", "ParameterizationName"]))
-        df = df[(df['DelineationName']==delineation_name) & (df['DiscretizationName'] == discretization_name) &
-                (df['ParameterizationName'] == parameterization_name)]
-        if not df.empty:
-            msg = (f"Cannot proceed. \nParameterization name '{parameterization_name}' "
-                   f"already exists with the disretization '{discretization_name}'.")
-            tweet(msg)
-            raise Exception(msg)
-        
-    # write the row to the table
+
+    # Insert the new (or replacement) row
     with arcpy.da.InsertCursor(meta_parameterization_table, fields) as insert_cursor:
         insert_cursor.insertRow(row_list)
 
-    # add the parameterization name to the metaParameterization table
+    # Refresh the table in the map
     tweet("Adding metaParameterization table to the map")
     aprx = arcpy.mp.ArcGISProject("CURRENT")
-    map = aprx.activeMap
-    for t in map.listTables():
+    m_map = aprx.activeMap
+    for t in m_map.listTables():
         if t.name == "metaParameterization":
-            map.removeTable(t)
+            m_map.removeTable(t)
             break
     table = Table(meta_parameterization_table)
-    map.addTable(table)
+    m_map.addTable(table)
 
 
 def parameterize(prjgdb, workspace, delineation_name, discretization, parameterization_name, save_intermediate_outputs):                 
 
-   
     tweet("Reading parameter values")
     (unfilled_dem_raster, slope_raster, aspect_raster, agwa_directory, flow_length_method,
      hydraulic_geometry_relationship, slope_method, fa_raster, flow_length_raster
      ) = read_extract_parameters(prjgdb, delineation_name, discretization, parameterization_name)      
     
     create_parameter_tables(workspace)
+
+    delete_existing_records(os.path.join(workspace, "parameters_hillslopes"),
+                        delineation_name, discretization, parameterization_name)
+    delete_existing_records(os.path.join(workspace, "parameters_channels"),
+                        delineation_name, discretization, parameterization_name)
 
     tweet("Populating parameter tables")
     populate_hillslopeids_in_parameter_tables(workspace, delineation_name, discretization, parameterization_name)
@@ -168,10 +183,28 @@ def parameterize(prjgdb, workspace, delineation_name, discretization, parameteri
 def copy_parameterization(workspace, delineation_name, discretization_name, parameterization_name, previous_parameterization_name):
     """Copy the parameterization from a previous parameterization to a new parameterization. Called from tool_parameterize_elements.
     Note: Element parameterization should always be done before parameterizing the soil and land cover. Therefore, in this function, 
-    we only copy the elemnent parameters."""               
+    we only copy the element parameters."""               
+
+    delete_existing_records(os.path.join(workspace, "parameters_hillslopes"),
+                        delineation_name, discretization_name, parameterization_name)
+    delete_existing_records(os.path.join(workspace, "parameters_channels"),
+                        delineation_name, discretization_name, parameterization_name)
     
+    # Clean any existing rows for the target parameterization name
+    where = (
+        f"DelineationName = '{delineation_name}' AND "
+        f"DiscretizationName = '{discretization_name}' AND "
+        f"ParameterizationName = '{parameterization_name}'"
+    )
+    for tbl_name in ("parameters_hillslopes", "parameters_channels"):
+        tbl = os.path.join(workspace, tbl_name)
+        if arcpy.Exists(tbl):
+            with arcpy.da.UpdateCursor(tbl, ["OID@"], where) as cur:
+                for _ in cur:
+                    cur.deleteRow()
+
     tables = ["parameters_hillslopes", "parameters_channels"]
-    tweet(f"Copying element parameterameters from '{previous_parameterization_name}' to '{parameterization_name}'")
+    tweet(f"Copying element parameters from '{previous_parameterization_name}' to '{parameterization_name}'")
     hillslope_fields =["DelineationName", "DiscretizationName", "ParameterizationName", "HillslopeID", "Area", 
                 "MeanElevation", "MeanSlope", "MeanAspect", "MeanFlowLength", "CentroidX", "CentroidY", "Width", "Length"]
     
@@ -181,7 +214,7 @@ def copy_parameterization(workspace, delineation_name, discretization_name, para
                 "UpstreamBankfullWidth", "DownstreamBankfullWidth", "UpstreamBottomWidth", "DownstreamBottomWidth"]   
 
     for table, fields in zip(tables, [hillslope_fields, channel_fields]):
-        table_path = arcpy.os.path.join(workspace, table)
+        table_path = os.path.join(workspace, table)
         new_rows = []
         with arcpy.da.SearchCursor(table_path, fields) as cursor:
             for row in cursor:
@@ -1034,6 +1067,4 @@ def read_extract_parameters(prjgdb, delineation_name, discretization_name, param
 
 
     return (unfilled_dem_raster, slope_raster, aspect_raster, agwa_directory, flow_length_method, hgr_method, 
-            slope_method, fa_raster, flow_length_raster)   
-   
-
+            slope_method, fa_raster, flow_length_raster)

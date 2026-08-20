@@ -55,6 +55,7 @@ class CompareHydrographs(object):
                                     parameterType="Optional",
                                     direction="Input")
         param3.enabled = True
+        param3.value = True
         param3.category = "Hillslope"
 
         param4 = arcpy.Parameter(displayName="Hllslope ID Selection Method",
@@ -108,6 +109,7 @@ class CompareHydrographs(object):
                             parameterType="Optional",
                             direction="Input")
         param9.enabled = True
+        param9.value = True
         param9.category = "Channel"
 
         param10 = arcpy.Parameter(displayName="Channel ID Selection Method",
@@ -132,7 +134,7 @@ class CompareHydrographs(object):
                                     datatype="GPString",
                                     parameterType="Optional",
                                     direction="Input")
-        param12.parameterDependencies = [param10.name]
+        param12.parameterDependencies = [param11.name]
         param12.enabled = False
         param12.category = "Channel"
 
@@ -247,7 +249,7 @@ class CompareHydrographs(object):
                     parameters[2].filter.list = []
 
         # Enable/Disable hillslope parameters
-        if parameters[3].value and parameters[3].altered:
+        if parameters[3].value:
             parameters[4].enabled = True
             if parameters[4].valueAsText == "Select Elements on Map":
                 parameters[5].enabled = True
@@ -272,7 +274,7 @@ class CompareHydrographs(object):
             parameters[8].enabled = False
 
         # Enable/Disable channel parameters
-        if parameters[9].value and parameters[9].altered:
+        if parameters[9].value:
             parameters[10].enabled = True
             if parameters[10].valueAsText == "Select Elements on Map":
                 parameters[11].enabled = True
@@ -317,15 +319,21 @@ class CompareHydrographs(object):
         
         if parameters[5].altered or parameters[7].altered:
             feature_class = parameters[5].valueAsText
-            parameters[6].value = fetch_ids(feature_class, "HillslopeID")
+            fetched_ids = fetch_ids(feature_class, "HillslopeID")
+            if (fetched_ids != "Error: No ID selected"
+                    or parameters[7].value
+                    or not parameters[6].value):
+                parameters[6].value = fetched_ids
             parameters[7].value = False
 
-        # Populate the channel ids and refresh if needed
         if parameters[11].altered or parameters[13].altered:
             feature_class = parameters[11].valueAsText
-            parameters[12].value = fetch_ids(feature_class, "ChannelID")
+            fetched_ids = fetch_ids(feature_class, "ChannelID")
+            if (fetched_ids != "Error: No ID selected"
+                    or parameters[13].value
+                    or not parameters[12].value):
+                parameters[12].value = fetched_ids
             parameters[13].value = False
-
  
         # Populate the output vaiables
         if parameters[15].altered:
@@ -373,20 +381,22 @@ class CompareHydrographs(object):
         # Validate input hillslope feature classes and selections
         if parameters[5].value:
             hillslope_feature_class = parameters[5].valueAsText
+            captured_ids = parameters[6].valueAsText
             if not arcpy.ListFields(hillslope_feature_class, "HillslopeID"):
                 parameters[5].setErrorMessage("Hillslope Feature Class must have a field named 'HillslopeID'.")
-            elif not arcpy.Describe(hillslope_feature_class).FIDSet:
+            elif (not captured_ids) or captured_ids == "Error: No ID selected":
                 parameters[5].setErrorMessage("No records selected in Hillslope Feature Class. "
-                                              " Please select record(s) before proceeding.")
+                                              "Please select hillslope element(s) before proceeding.")
 
         # Validate input channel feature classes and selections
         if parameters[11].value:
             channel_feature_class = parameters[11].valueAsText
+            captured_ids = parameters[12].valueAsText
             if not arcpy.ListFields(channel_feature_class, "ChannelID"):
                 parameters[11].setErrorMessage("Channel Feature Class must have a field named 'ChannelID'.")
-            elif not arcpy.Describe(channel_feature_class).FIDSet:
+            elif (not captured_ids) or captured_ids == "Error: No ID selected":
                 parameters[11].setErrorMessage("No records selected in Channel Feature Class. "
-                                            "Please select record(s) before proceeding.")
+                                               "Please select channel element(s) before proceeding.")
         
         # Validate User's input Element IDs
         def validate_and_process_ids(input_str, workspace, feature_class_suffix, id_field_name, error_parameter):
@@ -462,17 +472,29 @@ class CompareHydrographs(object):
 
         if compare_hillslope_elements:
             if hillslope_id_selection_method == "Select Elements on Map":
-                hillslope_ids = [int(x) for x in hillslope_ids_selection.split(',')]
-            else:
-                hillslope_ids = [int(x) for x in hillslope_ids_userinput.split(',')]
+                if hillslope_ids_selection and hillslope_ids_selection != "Error: No ID selected":
+                    hillslope_ids = [int(x.strip()) for x in hillslope_ids_selection.split(',') if x.strip()]
+                else:
+                    hillslope_ids = []
+            else:  # Input ID Manually
+                if hillslope_ids_userinput:
+                    hillslope_ids = [int(x.strip()) for x in hillslope_ids_userinput.split(',') if x.strip()]
+                else:
+                    hillslope_ids = []
         else:
             hillslope_ids = None
 
         if compare_channel_elements:
             if channel_id_selection_method == "Select Elements on Map":
-                channel_ids = [int(x) for x in channel_ids_selection.split(',')]
-            else:
-                channel_ids = [int(x) for x in channel_ids_userinput.split(',')]
+                if channel_ids_selection and channel_ids_selection != "Error: No ID selected":
+                    channel_ids = [int(x.strip()) for x in channel_ids_selection.split(',') if x.strip()]
+                else:
+                    channel_ids = []
+            else:  # Input ID Manually
+                if channel_ids_userinput:
+                    channel_ids = [int(x.strip()) for x in channel_ids_userinput.split(',') if x.strip()]
+                else:
+                    channel_ids = []
         else:
             channel_ids = None
             

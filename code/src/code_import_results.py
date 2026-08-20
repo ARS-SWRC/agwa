@@ -207,8 +207,13 @@ def unit_conversion(df_metric):
     cubic_meters_per_second_to_cubic_feet_per_second = 35.3147
     millimeters_to_inches = 0.0393701
     kilograms_to_pounds = 2.20462
-    ha_to_acre = 2.47105 
+    ha_to_acre = 2.47105
     cubic_meters_to_cubic_feet = 35.3147
+
+    mmhr_to_m_per_s = 1.0 / 1000.0 / 3600.0
+    norm_area_m2 = df_metric.Contributing_Area_m2.where(
+        df_metric.Element_Type == "Channel", df_metric.Element_Area_m2)
+    peak_flow_cms = df_metric.Peak_Flow_mmhr * mmhr_to_m_per_s * norm_area_m2
 
     # Assigning new columns with converted units
     df_metric_english = df_metric.assign(
@@ -219,7 +224,7 @@ def unit_conversion(df_metric):
         Inflow_inches = df_metric.Inflow_mm * millimeters_to_inches,
         Outflow_cft = df_metric.Outflow_cum * cubic_meters_to_cubic_feet,
         Outflow_inches = df_metric.Outflow_mm * millimeters_to_inches,
-        Peak_Flow_cfs = df_metric.Peak_Flow_mmhr * cubic_meters_per_second_to_cubic_feet_per_second,
+        Peak_Flow_cfs = peak_flow_cms * cubic_meters_per_second_to_cubic_feet_per_second,
         Peak_Flow_inhr = df_metric.Peak_Flow_mmhr * millimeters_to_inches,
         Peak_Sediment_Discharge_lbs_s = df_metric.peak_sediment_discharge_kgs * kilograms_to_pounds,
         Rainfall_inches = df_metric.Rainfall_mm * millimeters_to_inches,

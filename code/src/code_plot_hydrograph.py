@@ -146,7 +146,7 @@ def transform_label(label):
     new_label = label
     for old, new in replacements.items():
         new_label = new_label.replace(old, new)
-    label_name = label.split('(')[0][:-1]
+    label_name = label.split('(')[0].strip()
     return new_label, label_name
 
 

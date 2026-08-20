@@ -53,6 +53,7 @@ class PlotHydrograph(object):
                                     parameterType="Optional",
                                     direction="Input")
         param3.enabled = True
+        param3.value = True
         param3.category = "Hillslope"
 
         param4 = arcpy.Parameter(displayName="Hllslope ID Selection Method",
@@ -105,6 +106,7 @@ class PlotHydrograph(object):
                             parameterType="Optional",
                             direction="Input")
         param9.enabled = True
+        param9.value = True
         param9.category = "Channel"
         
         param10 = arcpy.Parameter(displayName="Channel ID Selection Method",

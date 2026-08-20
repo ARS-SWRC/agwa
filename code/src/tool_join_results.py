@@ -176,55 +176,107 @@ class JoinResults(object):
 
         return
 
-
     def process_join(self, simulation_name, delineation, discretization, workspace):
         """Join the simulation results to the discretization feature class."""
 
-        try:
-            # Setup paths
-            discretization_hillslopes = os.path.join(workspace, f"{discretization}_hillslopes")
-            discretization_channels = os.path.join(workspace, f"{discretization}_channels")
-            results_feature_class_hillslopes = os.path.join(workspace, f"k2_results_hillslope_{simulation_name}")
-            results_feature_class_channels = os.path.join(workspace, f"k2_results_channel_{simulation_name}")
+        temp_table = os.path.join(workspace, "k2_results_temp")
+        temp_lyr = "temp_discretization_lyr"
 
-            # Join simulation results to the discretization feature classes
-            join_table_abspath = os.path.join(workspace, "k2_results")
-            arcpy.MakeTableView_management(join_table_abspath, "join_table_view",
-                                (f"DelineationName = '{delineation}' AND DiscretizationName = '{discretization}' AND"
-                                f" SimulationName = '{simulation_name}'"))
-            
-            arcpy.CopyRows_management("join_table_view", os.path.join(workspace, "k2_results_temp"))
+        try:
+            # Paths
+            disc_hillslopes = os.path.join(workspace, f"{discretization}_hillslopes")
+            disc_channels   = os.path.join(workspace, f"{discretization}_channels")
+            out_hillslope   = os.path.join(workspace, f"k2_results_hillslope_{simulation_name}")
+            out_channel     = os.path.join(workspace, f"k2_results_channel_{simulation_name}")
+            join_table      = os.path.join(workspace, "k2_results")
+
+            # 1. Create filtered temporary table
+            where_clause = (
+                f"DelineationName = '{delineation}' AND "
+                f"DiscretizationName = '{discretization}' AND "
+                f"SimulationName = '{simulation_name}'"
+            )
+
+            if arcpy.Exists("join_table_view"):
+                arcpy.management.Delete("join_table_view")
+
+            arcpy.management.MakeTableView(join_table, "join_table_view", where_clause)
+
+            if arcpy.Exists(temp_table):
+                arcpy.management.Delete(temp_table)
+
+            arcpy.management.CopyRows("join_table_view", temp_table)
+            arcpy.management.Delete("join_table_view")
 
             arcpy.AddMessage(f"Joining simulation '{simulation_name}':")
-            for layer, field, out_fc in [(discretization_hillslopes, "HillslopeID", results_feature_class_hillslopes), 
-                                         (discretization_channels, "ChannelID", results_feature_class_channels)]:
 
-                join_result = arcpy.management.AddJoin(layer, field, 
-                                                       os.path.join(workspace, "k2_results_temp"), 
-                                                       "Element_ID", "KEEP_ALL")
-                                                                                       
-                arcpy.AddMessage(f"   Join performed on {layer} with field {field}.")
+            # 2. Join and export for hillslopes + channels
+            targets = [
+                (disc_hillslopes, "HillslopeID", out_hillslope),
+                (disc_channels,   "ChannelID",   out_channel),
+            ]
+
+            for layer_path, field, out_fc in targets:
+                if not arcpy.Exists(layer_path):
+                    arcpy.AddWarning(f"Target feature class does not exist: {layer_path}")
+                    continue
+
+                if arcpy.Exists(temp_lyr):
+                    arcpy.management.Delete(temp_lyr)
+
+                arcpy.management.MakeFeatureLayer(layer_path, temp_lyr)
+                arcpy.management.AddJoin(temp_lyr, field, temp_table, "Element_ID", "KEEP_ALL")
+                arcpy.AddMessage(f"   Join performed on {os.path.basename(layer_path)} with field {field}.")
 
                 if arcpy.Exists(out_fc):
                     arcpy.management.Delete(out_fc)
-                arcpy.management.CopyFeatures(join_result, out_fc)
+
+                arcpy.management.CopyFeatures(temp_lyr, out_fc)
                 arcpy.AddMessage(f"   Joined data exported to {out_fc}.")
 
-            arcpy.management.Delete(os.path.join(workspace, "k2_results_temp"))                
+                # Clean up the temporary layer (removes the join as well)
+                arcpy.management.Delete(temp_lyr)
 
-            # Add the joined layers to the map
+            # 3. Clean up temp table
+            if arcpy.Exists(temp_table):
+                arcpy.management.Delete(temp_table)
+
+            # 4. Add results to the map (remove old ones first)
             aprx = arcpy.mp.ArcGISProject("CURRENT")
             m = aprx.activeMap
-            for path in [results_feature_class_hillslopes, results_feature_class_channels]:
-                lyr = m.addDataFromPath(path)
-                m.moveLayer(m.listLayers()[0], lyr)
-            arcpy.AddMessage(f"   Joined layers added to map and moved to top.\n\n")
+
+            for lyr in m.listLayers():
+                if lyr.name in [f"k2_results_hillslope_{simulation_name}",
+                                f"k2_results_channel_{simulation_name}"]:
+                    m.removeLayer(lyr)
+
+            for path in (out_hillslope, out_channel):
+                if arcpy.Exists(path):
+                    added_lyr = m.addDataFromPath(path)
+                    # Move to top of TOC
+                    if m.listLayers():
+                        m.moveLayer(m.listLayers()[0], added_lyr)
+
             aprx.save()
+            arcpy.AddMessage("   Joined layers added to map.\n")
 
         except Exception as e:
             arcpy.AddError(f"An error occurred: {str(e)}")
+            import traceback
+            arcpy.AddError(traceback.format_exc())
 
-        return
+        finally:
+            for name in ["join_table_view", temp_lyr]:
+                if arcpy.Exists(name):
+                    try:
+                        arcpy.management.Delete(name)
+                    except Exception:
+                        pass
+            if arcpy.Exists(temp_table):
+                try:
+                    arcpy.management.Delete(temp_table)
+                except Exception:
+                    pass
 
 
     def postExecute(self, parameters):

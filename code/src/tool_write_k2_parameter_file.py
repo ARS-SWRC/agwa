@@ -52,31 +52,31 @@ class WriteK2ParameterFile(object):
                                  parameterType="Required",
                                  direction="Input")
 
-        param4 = arcpy.Parameter(displayName="Workspace",
+        param4 = arcpy.Parameter(displayName="Overwrite Existing Parameter File",
+                                 name="Overwrite_Parameter_File",
+                                 datatype="GPBoolean",
+                                 parameterType="Optional",
+                                 direction="Input")
+        param4.value = False
+        param4.enabled = False 
+
+        param5 = arcpy.Parameter(displayName="Workspace",
                                  name="Workspace",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Input")
     
-        param5 = arcpy.Parameter(displayName="Project GeoDataBase",
+        param6 = arcpy.Parameter(displayName="Project GeoDataBase",
                                  name="ProjectGeoDataBase",
                                  datatype="GPString",
                                  parameterType="Derived",
                                  direction="Input")
         
-        param6 = arcpy.Parameter(displayName="Parameter File Path",
+        param7 = arcpy.Parameter(displayName="Parameter File Path",
                                 name="Par_File_Path",
                                 datatype="GPString",
                                 parameterType="Derived",
-                                direction="Input")
-                                 
-
-        param7 = arcpy.Parameter(displayName="Save Intermediate Outputs",
-                                 name="Save_Intermediate_Outputs",
-                                 datatype="GPBoolean",
-                                 parameterType="Optional",
-                                 direction="Input")
-        param7.value = False
+                                direction="Input")                              
 
         params = [param0, param1, param2, param3, param4, param5, param6, param7]
         return params
@@ -85,11 +85,8 @@ class WriteK2ParameterFile(object):
         """Set whether tool is licensed to execute."""
         return True
 
-    def updateParameters(self, parameters):
-        """Modify the values and properties of parameters before internal
-        validation is performed.  This method is called whenever a parameter
-        has been changed."""
 
+    def updateParameters(self, parameters):
         workspace, prjgdb, discretization_list, parameterization_list = "", "", [], []
         if parameters[0].value:
             delineation_name = parameters[0].valueAsText
@@ -97,14 +94,14 @@ class WriteK2ParameterFile(object):
             m = project.activeMap
             for table in m.listTables():
                 if table.name == "metaDelineation":
-                    with arcpy.da.SearchCursor(table, ["DelineationName", "ProjectGeoDataBase", 
+                    with arcpy.da.SearchCursor(table, ["DelineationName", "ProjectGeoDataBase",
                                                     "DelineationWorkspace"]) as cursor:
                         for row in cursor:
                             if row[0] == delineation_name:
                                 prjgdb = row[1]
                                 workspace = row[2]
                                 if prjgdb and workspace:
-                                    break                                
+                                    break
 
             for table in m.listTables():
                 if table.name == "metaDiscretization":
@@ -113,30 +110,53 @@ class WriteK2ParameterFile(object):
                             if row[0] == delineation_name:
                                 discretization_list.append(row[1])
                         break
-        
-        parameters[1].filter.list = discretization_list  
+
+        parameters[1].filter.list = discretization_list
 
         if parameters[0].value and parameters[1].value:
             delineation_name = parameters[0].valueAsText
             discretization_name = parameters[1].valueAsText
             for table in m.listTables():
                 if table.name == "metaParameterization":
-                    with arcpy.da.SearchCursor(table, ["DelineationName", "DiscretizationName", "ParameterizationName"]) as cursor:
+                    with arcpy.da.SearchCursor(table, ["DelineationName", "DiscretizationName",
+                                                    "ParameterizationName"]) as cursor:
                         for row in cursor:
                             if row[0] == delineation_name and row[1] == discretization_name:
                                 parameterization_list.append(row[2])
-                        break        
+                        break
 
             parameters[2].filter.list = parameterization_list
-            parameterization_file_name = parameters[3].valueAsText
-            parameters[4].value = workspace
-            parameters[5].value = prjgdb
+            parameters[5].value = workspace
+            parameters[6].value = prjgdb
 
-            parameter_file_path = os.path.join(os.path.split(workspace)[0], "modeling_files", discretization_name, 
-                                            "parameter_files", f"{parameterization_file_name}.par")
-            parameters[6].value = parameter_file_path
+            if parameters[3].value:
+                parameterization_file_name = parameters[3].valueAsText.strip()
+                parameter_file_path = os.path.join(os.path.split(workspace)[0], "modeling_files",
+                                                discretization_name, "parameter_files",
+                                                f"{parameterization_file_name}.par")
+                parameters[7].value = parameter_file_path
+
+        # Enable the Overwrite checkbox only when the target file already exists
+        file_exists = False
+        if parameters[6].value and parameters[7].value:
+            prjgdb = parameters[6].valueAsText
+            parameter_file_path = parameters[7].valueAsText
+
+            if os.path.exists(parameter_file_path):
+                file_exists = True
+            else:
+                meta_table = os.path.join(prjgdb, "metaParameterizationFile")
+                if arcpy.Exists(meta_table):
+                    df = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_table, ["ParameterizationFilePath"]))
+                    if not df.empty and parameter_file_path.lower() in df['ParameterizationFilePath'].str.lower().values:
+                        file_exists = True
+
+        parameters[4].enabled = file_exists
+        if not file_exists:
+            parameters[4].value = False 
 
         return
+
 
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
@@ -162,9 +182,9 @@ class WriteK2ParameterFile(object):
                                             "Please perform Step 3 and 4 before running this step if you want to proceed.")
 
         # check if the parameter file name already exists in the metaParameterizationFile table
-        if parameters[5].value and parameters[6].value:
-            prjgdb = parameters[5].valueAsText
-            parameter_file_path = parameters[6].value
+        if parameters[6].value and parameters[7].value:
+            prjgdb = parameters[6].valueAsText
+            parameter_file_path = parameters[7].value
             meta_parameterization_file_table = os.path.join(prjgdb, "metaParameterizationFile")
             if arcpy.Exists(meta_parameterization_file_table):
                 df_parameterization_file = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_parameterization_file_table, ["ParameterizationFilePath"]))
@@ -183,7 +203,20 @@ class WriteK2ParameterFile(object):
             if re.match("^[A-Za-z][A-Za-z0-9_]*$", paramter_file_name) is None:
                 parameters[3].setErrorMessage("The paramtern file name must start with a letter and contain only letters, numbers, and underscores.")
 
+        # duplicate file name: error unless Overwrite is checked
+        if parameters[7].value:
+            parameter_file_path = parameters[7].valueAsText
+            if parameters[4].enabled:     
+                if parameters[4].value:  
+                    parameters[3].setWarningMessage(
+                        f"Parameter file '{parameter_file_path}' already exists and will be overwritten.")
+                else:
+                    parameters[3].setErrorMessage(
+                        f"Parameter file '{parameter_file_path}' already exists. "
+                        "Choose another name, or check 'Overwrite Existing Parameter File' to replace it.")
+
         return
+
     
 
     def execute(self, parameters, messages):
@@ -194,12 +227,13 @@ class WriteK2ParameterFile(object):
         discretization = parameters[1].valueAsText
         parameterization_name = parameters[2].valueAsText
         parameter_file_name = parameters[3].valueAsText
-        workspace = parameters[4].valueAsText
-        prjgdb = parameters[5].valueAsText
-        parameter_file_path = parameters[6].valueAsText
+        overwrite = parameters[4].value
+        workspace = parameters[5].valueAsText
+        prjgdb = parameters[6].valueAsText
+        parameter_file_path = parameters[7].valueAsText
 
         agwa.initialize_workspace(prjgdb, delineation_name, discretization, parameterization_name,
-                                  parameter_file_path)
+                                  parameter_file_path, overwrite)
 
         agwa.write_parfile(prjgdb, workspace, delineation_name, discretization, parameterization_name,
                      parameter_file_path)

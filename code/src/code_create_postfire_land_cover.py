@@ -11,10 +11,33 @@ import importlib
 importlib.reload(AGWA_LandCoverMod)
 
 
-def execute(agwa_directory, burn_severity_map, severity_field, land_cover_raster, change_table, output_location, 
-            output_name, delineation_gdb, save_intermediate_outputs):
+def snapshot(folder):
+    # Returns the set of file names in folder
+    try:
+        return set(os.listdir(folder))
+    except OSError:
+        return set()
 
-    # Set the workspace
+
+def remove_new_files(folder, before, keep=""):
+    # Deletes files that appeared in the folder.        
+    # folder - string - path to a file system folder
+    # before - set - file names present before the run
+    # keep - string - optional
+    for f in sorted(snapshot(folder) - before):
+        if keep and f.startswith(keep):
+            continue
+        target = os.path.join(folder, f)
+        try:
+            arcpy.management.Delete(target)
+        except Exception as e:
+            AGWA_LandCoverMod.tweet(f"Warning: unable to remove intermediate {f}: {e}", True)
+
+
+def execute(agwa_directory, burn_severity_map, severity_field, land_cover_raster, change_table, output_location,
+            output_name, save_intermediate_outputs):
+
+    # Set the workspace. output_location may be a folder or a geodatabase.
     arcpy.env.workspace = output_location
     change_table = os.path.join(agwa_directory, "lookup_tables.gdb", change_table)
 
@@ -27,26 +50,25 @@ def execute(agwa_directory, burn_severity_map, severity_field, land_cover_raster
     AGWA_LandCoverMod.check_license("spatial", True)
     AGWA_LandCoverMod.tweet(f"... Spatial Analyst license checked out successfully!")
 
+    ext = AGWA_LandCoverMod.raster_ext(output_location)
+    intermediate_folder = output_location if ext else arcpy.env.scratchFolder
+    before = snapshot(intermediate_folder)
+
     # Execute the BurnSeverity function
     AGWA_LandCoverMod.tweet(f"Executing Burn Severity tool ...")
     AGWA_LandCoverMod.create_burn_severity_lc(burn_severity_map, severity_field, land_cover_raster,
                                               change_table, output_location, output_name)
     AGWA_LandCoverMod.tweet(f"... Burn Severity tool executed successfully!")
 
-    created_lc = os.path.join(output_location, output_name + ".tif")
-        
-    if delineation_gdb is None:
-        m = arcpy.mp.ArcGISProject("CURRENT").activeMap
-        m.addDataFromPath(created_lc)
-        if not save_intermediate_outputs:
-            for f in os.listdir(output_location):
-                if not output_name in f:
-                    os.remove(os.path.join(output_location, f))
-    else:
-        arcpy.env.workspace = delineation_gdb
-        arcpy.CopyRaster_management(created_lc, os.path.join(delineation_gdb, output_name))
-        m = arcpy.mp.ArcGISProject("CURRENT").activeMap
-        m.addDataFromPath(os.path.join(delineation_gdb, output_name))
-        if not save_intermediate_outputs:
-            arcpy.Delete_management(output_location)    
+    created_lc = os.path.join(output_location, output_name + ext)
 
+    # Remove intermediates before the land cover is added to the map
+    if not save_intermediate_outputs:
+        AGWA_LandCoverMod.tweet("Removing intermediate outputs ...")
+        remove_new_files(intermediate_folder, before, os.path.basename(created_lc) if ext else "")
+
+    m = arcpy.mp.ArcGISProject("CURRENT").activeMap
+    postfire_layer = m.addDataFromPath(created_lc)
+    top_layer = m.listLayers()[0]
+    if top_layer.name != postfire_layer.name:
+        m.moveLayer(top_layer, postfire_layer, "BEFORE")
