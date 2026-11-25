@@ -6,7 +6,7 @@ import pandas as pd
 from enum import Enum
 from arcpy._mp import Table
 from collections import deque
-import arcpy.management  # Import statement added to provide intellisense in PyCharm
+import arcpy.management 
 import config
 arcpy.env.parallelProcessingFactor = config.PARALLEL_PROCESSING_FACTOR
 
@@ -18,10 +18,11 @@ def tweet(msg):
     """Produce a message for both arcpy and Python."""
     m = f"\n{msg}\n"
     arcpy.AddMessage(m)
-    print(m)
 
-def delete_existing_records(table_path, delineation_name, discretization_name, parameterization_name):
-    """Safely removes existing matching records from a table if it exists and has the required fields."""
+def delete_existing_records(
+    table_path, delineation_name, discretization_name, parameterization_name):
+    """Safely removes existing matching records from a table if it exists
+    and has the required fields."""
     if not arcpy.Exists(table_path):
         return
 
@@ -40,9 +41,11 @@ def delete_existing_records(table_path, delineation_name, discretization_name, p
             cursor.deleteRow()
 
 
-def initialize_workspace(delineation_name, prjgdb, discretization_name, parameterization_name,
-                         slope_method, flow_length_method, hgr_method):
-    """Initialize the workspace by creating/cleaning metaParameterization and writing the user's inputs."""
+def initialize_workspace(
+    delineation_name, prjgdb, discretization_name, parameterization_name,
+    slope_method, flow_length_method, hgr_method):
+    """Initialize the workspace by creating/cleaning metaParameterization 
+    and writing the user's inputs."""
 
     tweet("Checking metaDiscretization table")
 
@@ -69,17 +72,20 @@ def initialize_workspace(delineation_name, prjgdb, discretization_name, paramete
               "SoilsPath", "SoilsDatabasePath", "MaxHorizons", "MaxThickness",
               "CreationDate", "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation", "Status"]
       
-    row_list = [delineation_name, discretization_name, parameterization_name, 
-                slope_method, flow_length_method, hgr_method,
-                "", "", "", "", "", "", "",
-                datetime.datetime.now().isoformat(), config.AGWA_VERSION, config.AGWAGDB_VERSION, "X"]        
+    row_list = [
+        delineation_name, discretization_name, parameterization_name, 
+        slope_method, flow_length_method, hgr_method,
+        "", "", "", "", "", "", "",
+        datetime.datetime.now().isoformat(), config.AGWA_VERSION, config.AGWAGDB_VERSION, "X"]        
                 
     meta_parameterization_table = os.path.join(prjgdb, "metaParameterization")
 
+    # Clean any previous meta row for this parameterization (true overwrite)
     if arcpy.Exists(meta_parameterization_table):
         delete_existing_records(meta_parameterization_table,
                                 delineation_name, discretization_name, parameterization_name)
 
+    # Create the table if it does not exist
     if not arcpy.Exists(meta_parameterization_table):
         tweet("Creating metaParameterization table")
         arcpy.CreateTable_management(prjgdb, "metaParameterization") 
@@ -102,88 +108,122 @@ def initialize_workspace(delineation_name, prjgdb, discretization_name, paramete
     m_map.addTable(table)
 
 
-def parameterize(prjgdb, workspace, delineation_name, discretization, parameterization_name, save_intermediate_outputs):                 
+def parameterize(
+    prjgdb, workspace, delineation_name, discretization, parameterization_name, 
+    save_intermediate_outputs):
 
     tweet("Reading parameter values")
-    (unfilled_dem_raster, slope_raster, aspect_raster, agwa_directory, flow_length_method,
-     hydraulic_geometry_relationship, slope_method, fa_raster, flow_length_raster
-     ) = read_extract_parameters(prjgdb, delineation_name, discretization, parameterization_name)      
+
+    (unfilled_dem_raster,
+    slope_raster,
+    aspect_raster,
+    agwa_directory,
+    flow_length_method,
+    hydraulic_geometry_relationship,
+    slope_method,
+    fa_raster,
+    flow_length_raster) = read_extract_parameters(
+        prjgdb, delineation_name, discretization, parameterization_name)   
+     
+    # Start AGWA parameterization
+    arcpy.env.workspace = workspace
+    arcpy.env.overwriteOutput = True 
     
     create_parameter_tables(workspace)
 
-    delete_existing_records(os.path.join(workspace, "parameters_hillslopes"),
-                        delineation_name, discretization, parameterization_name)
-    delete_existing_records(os.path.join(workspace, "parameters_channels"),
-                        delineation_name, discretization, parameterization_name)
+    # guarantee a clean slate for this parameterization (rewrite instead of append)
+    delete_existing_records(
+        os.path.join(workspace, "parameters_hillslopes"),
+        delineation_name, discretization, parameterization_name)
+    delete_existing_records(
+        os.path.join(workspace, "parameters_channels"),
+        delineation_name, discretization, parameterization_name)
 
     tweet("Populating parameter tables")
-    populate_hillslopeids_in_parameter_tables(workspace, delineation_name, discretization, parameterization_name)
+    populate_hillslopeids_in_parameter_tables(
+        workspace, delineation_name, discretization, parameterization_name)
 
-    # Start AGWA parameterization
-    arcpy.env.workspace = workspace
-    arcpy.env.overwriteOutput = True
 
     tweet("Calculating hillslope areas")
-    calculate_hillslope_areas(workspace, delineation_name, discretization, parameterization_name,
-                            save_intermediate_outputs)
+    calculate_hillslope_areas(
+        workspace, delineation_name, discretization, parameterization_name,
+        save_intermediate_outputs)
 
     tweet("Calculating mean elevation")
-    calculate_mean_elevation(workspace, delineation_name, discretization, parameterization_name,
-                            unfilled_dem_raster, save_intermediate_outputs)
+    calculate_mean_elevation(
+        workspace, delineation_name, discretization, parameterization_name,
+        unfilled_dem_raster, save_intermediate_outputs)
 
     tweet("Calculating mean slope")
-    calculate_mean_slope(workspace, delineation_name, discretization, parameterization_name, slope_raster,
-                        save_intermediate_outputs)
+    calculate_mean_slope(
+        workspace, delineation_name, discretization, parameterization_name, 
+        slope_raster, save_intermediate_outputs)
 
     if slope_method == "Complex":
         tweet("Calculating complex slope")
-        calculate_complex_slope(workspace, agwa_directory, delineation_name, discretization, parameterization_name, slope_raster,
-                                fa_raster, flow_length_raster, save_intermediate_outputs)
+        calculate_complex_slope(
+            workspace, agwa_directory, delineation_name, discretization,
+            parameterization_name, slope_raster, fa_raster, flow_length_raster, 
+            save_intermediate_outputs)
 
 
     tweet("Calculating mean aspect")
-    calculate_mean_aspect(workspace, delineation_name, discretization, parameterization_name, aspect_raster,
-                        save_intermediate_outputs)
+    calculate_mean_aspect(
+        workspace, delineation_name, discretization, parameterization_name,
+        aspect_raster, save_intermediate_outputs)
 
 
     tweet("Calculating mean flow length")
-    calculate_mean_flow_length(workspace, delineation_name, discretization, parameterization_name,
-                            save_intermediate_outputs)
+    calculate_mean_flow_length(
+        workspace, delineation_name, discretization, parameterization_name,
+        save_intermediate_outputs)
 
     tweet("Calculating hillslope centroids")
-    calculate_centroids(workspace, delineation_name, discretization, parameterization_name, save_intermediate_outputs)
+    calculate_centroids(
+        workspace, delineation_name, discretization, parameterization_name, 
+        save_intermediate_outputs)
 
     tweet("Calculating stream lengths")
-    calculate_stream_length(workspace, delineation_name, discretization, parameterization_name,
-                            save_intermediate_outputs)
+    calculate_stream_length(
+        workspace, delineation_name, discretization, parameterization_name,
+        save_intermediate_outputs)
 
     tweet("Calculating hillslope geometries")
-    calculate_geometries(workspace, delineation_name, discretization, parameterization_name, flow_length_method,
-                        save_intermediate_outputs)
+    calculate_geometries(
+        workspace, delineation_name, discretization, parameterization_name, 
+        flow_length_method, save_intermediate_outputs)
 
     tweet("Calculating stream sequence")
-    calculate_stream_sequence(workspace, delineation_name, discretization, parameterization_name,
-                            save_intermediate_outputs)
+    calculate_stream_sequence(
+        workspace, delineation_name, discretization, parameterization_name,
+        save_intermediate_outputs)
 
     tweet("Calculating contributing areas")
-    calculate_contributing_area_k2(workspace, delineation_name, discretization, parameterization_name,
-                                save_intermediate_outputs)
+    calculate_contributing_area_k2(
+        workspace, delineation_name, discretization, parameterization_name,
+        save_intermediate_outputs)
 
     tweet("Calculating stream slopes and centroids")
-    calculate_stream_slope(workspace, delineation_name, discretization, parameterization_name, unfilled_dem_raster,
-                        save_intermediate_outputs)
+    calculate_stream_slope(
+        workspace, delineation_name, discretization, parameterization_name, 
+        unfilled_dem_raster, save_intermediate_outputs)
 
     tweet("Calculating stream geometries")
-    calculate_stream_geometries(workspace, delineation_name, discretization, parameterization_name,
-                                hydraulic_geometry_relationship, agwa_directory, save_intermediate_outputs)
+    calculate_stream_geometries(
+        workspace, delineation_name, discretization, parameterization_name,
+        hydraulic_geometry_relationship, agwa_directory, save_intermediate_outputs)
 
     return
 
 
-def copy_parameterization(workspace, delineation_name, discretization_name, parameterization_name, previous_parameterization_name):
-    """Copy the parameterization from a previous parameterization to a new parameterization. Called from tool_parameterize_elements.
-    Note: Element parameterization should always be done before parameterizing the soil and land cover. Therefore, in this function, 
-    we only copy the element parameters."""               
+def copy_parameterization(
+    workspace, delineation_name, discretization_name, parameterization_name, 
+    previous_parameterization_name):
+    """Copy the parameterization from a previous parameterization to a new parameterization. 
+    Note: Element parameterization should always be done before parameterizing the soil
+    and land cover. Therefore, in this function, we only copy the element parameters.
+    Any existing records for the *new* name are deleted first.
+    """               
 
     delete_existing_records(os.path.join(workspace, "parameters_hillslopes"),
                         delineation_name, discretization_name, parameterization_name)
@@ -203,24 +243,34 @@ def copy_parameterization(workspace, delineation_name, discretization_name, para
                 for _ in cur:
                     cur.deleteRow()
 
+    msg = (
+        f"Copying element parameters from '{previous_parameterization_name}' "
+        f"to '{parameterization_name}'")
+    tweet(msg)
+
     tables = ["parameters_hillslopes", "parameters_channels"]
-    tweet(f"Copying element parameters from '{previous_parameterization_name}' to '{parameterization_name}'")
-    hillslope_fields =["DelineationName", "DiscretizationName", "ParameterizationName", "HillslopeID", "Area", 
-                "MeanElevation", "MeanSlope", "MeanAspect", "MeanFlowLength", "CentroidX", "CentroidY", "Width", "Length"]
+    hillslope_fields =[
+        "DelineationName", "DiscretizationName", "ParameterizationName", "HillslopeID",
+        "Area", "MeanElevation", "MeanSlope", "MeanAspect", "MeanFlowLength",
+        "CentroidX", "CentroidY", "Width", "Length"]
     
-    channel_fields = ["DelineationName", "DiscretizationName", "ParameterizationName", "ChannelID", "Sequence",                      
-                "ChannelLength", "LateralArea", "UpstreamArea", "UpstreamElevation", "DownstreamElevation",
-                "MeanSlope", "CentroidX", "CentroidY", "SideSlope1", "SideSlope2", "UpstreamBankfullDepth", "DownstreamBankfullDepth",
-                "UpstreamBankfullWidth", "DownstreamBankfullWidth", "UpstreamBottomWidth", "DownstreamBottomWidth"]   
+    channel_fields = [
+        "DelineationName", "DiscretizationName", "ParameterizationName", "ChannelID", 
+        "Sequence", "ChannelLength", "LateralArea", "UpstreamArea", "UpstreamElevation",
+        "DownstreamElevation", "MeanSlope", "CentroidX", "CentroidY", "SideSlope1", 
+        "SideSlope2", "UpstreamBankfullDepth", "DownstreamBankfullDepth",
+        "UpstreamBankfullWidth", "DownstreamBankfullWidth", "UpstreamBottomWidth", 
+        "DownstreamBottomWidth"] 
 
     for table, fields in zip(tables, [hillslope_fields, channel_fields]):
         table_path = os.path.join(workspace, table)
         new_rows = []
         with arcpy.da.SearchCursor(table_path, fields) as cursor:
             for row in cursor:
-                if ((row[fields.index('ParameterizationName')] == previous_parameterization_name) and 
-                   (row[fields.index('DelineationName')] == delineation_name) and
-                   (row[fields.index('DiscretizationName')] == discretization_name)):
+                if (
+                    (row[fields.index('ParameterizationName')] == previous_parameterization_name) and 
+                    (row[fields.index('DelineationName')] == delineation_name) and
+                    (row[fields.index('DiscretizationName')] == discretization_name)):
                     new_row = list(row)
                     new_row[fields.index('ParameterizationName')] = parameterization_name
                     new_rows.append(tuple(new_row))
@@ -229,9 +279,11 @@ def copy_parameterization(workspace, delineation_name, discretization_name, para
                 cursor.insertRow(new_row)
 
 
-def calculate_hillslope_areas(workspace, delineation_name, discretization_name, parameterization_name,
-                            save_intermediate_outputs):
-    """Calculate the area of each hillslope in the discretization feature class and populate the parameters_hillslopes table."""
+def calculate_hillslope_areas(
+    workspace, delineation_name, discretization_name, parameterization_name,
+     save_intermediate_outputs):
+    """Calculate the area of each hillslope in the discretization feature class and populate 
+    the parameters_hillslopes table."""
 
     table_name = "parameters_hillslopes"
     parameters_hillslopes_table = os.path.join(workspace, table_name)
@@ -245,17 +297,23 @@ def calculate_hillslope_areas(workspace, delineation_name, discretization_name, 
     expression = (f"{delineation_name_field} = '{delineation_name}' AND " 
                  f"{discretization_name_field} = '{discretization_name}' AND " 
                  f"{parameterization_name_field} = '{parameterization_name}'")
-    arcpy.management.MakeTableView(parameters_hillslopes_table, table_view, expression)
-    arcpy.management.AddJoin(table_view, "HillslopeID", discretization_feature_class, "HillslopeID")
+
+    arcpy.management.MakeTableView(
+        parameters_hillslopes_table, table_view, expression)
+    arcpy.management.AddJoin(
+        table_view, "HillslopeID", discretization_feature_class, "HillslopeID")
     area_field = arcpy.AddFieldDelimiters(workspace, f"{table_name}.Area")
-    shape_area_field = arcpy.AddFieldDelimiters(workspace, f"{discretization_hillslopes}.Shape_Area")
+    shape_area_field = arcpy.AddFieldDelimiters(
+        workspace, f"{discretization_hillslopes}.Shape_Area")
     arcpy.management.CalculateField(table_view, area_field, f"!{shape_area_field}!", "PYTHON3")
     arcpy.management.RemoveJoin(table_view, discretization_hillslopes)
     arcpy.management.Delete(table_view)
 
 
-def populate_hillslopeids_in_parameter_tables(workspace, delineation_name, discretization_name, parameterization_name):    
-    """get hillslope ids from the discretization feature classes and populate the two tables."""
+def populate_hillslopeids_in_parameter_tables(
+    workspace, delineation_name, discretization_name, parameterization_name):    
+    """get hillslope ids from the discretization feature classes and populate
+     the two tables."""
 
     parameters_hillslopes_table = os.path.join(workspace, "parameters_hillslopes")
     parameters_channels_table = os.path.join(workspace, "parameters_channels")
@@ -281,8 +339,61 @@ def populate_hillslopeids_in_parameter_tables(workspace, delineation_name, discr
                                              channel_id))
 
 
-def calculate_mean_elevation(workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
-                            save_intermediate_outputs):
+def zonal_statistics(feature_class, zone_field, value_raster, output_table, statistics_type="MEAN"):
+    """
+    Runs ZonalStatisticsAsTable. If any polygons are skipped (due to sliver size or 
+    extent issues), it buffers them before running the zonal statistics.
+    Four variables are affected: mean elevation, mean slope, mean aspect, mean flow length
+    """
+    arcpy.sa.ZonalStatisticsAsTable(
+        feature_class, zone_field, value_raster, output_table, "DATA", statistics_type)
+    
+    processed_ids = set()
+    with arcpy.da.SearchCursor(output_table, [zone_field]) as cursor:
+        for row in cursor:
+            processed_ids.add(row[0])
+            
+    all_ids = set()
+    with arcpy.da.SearchCursor(feature_class, [zone_field]) as cursor:
+        for row in cursor:
+            all_ids.add(row[0])
+            
+    missing_ids = all_ids - processed_ids
+    
+    if missing_ids:
+        print(f"Warning: {len(missing_ids)} element(s) skipped by zonal stats. "
+        " Applying buffer patch...")
+        
+        desc = arcpy.Describe(value_raster)
+        cell_size = (desc.meanCellWidth + desc.meanCellHeight) / 2.0
+        buffer_distance = cell_size # buffer size
+        
+        id_field_name = arcpy.AddFieldDelimiters(feature_class, zone_field)
+        id_list_str = ",".join(map(str, missing_ids))
+        expression = f"{id_field_name} IN ({id_list_str})"
+        
+        temp_layer = "missing_features_lyr"
+        arcpy.management.MakeFeatureLayer(feature_class, temp_layer, expression)
+        
+        temp_buffer = "in_memory\\buffered_sliver"
+        arcpy.analysis.Buffer(
+            temp_layer, temp_buffer, f"{buffer_distance} Meters", "FULL", "ROUND", "NONE")
+        
+        temp_zonal = "in_memory\\sliver_zonal"
+        arcpy.sa.ZonalStatisticsAsTable(
+            temp_buffer, zone_field, value_raster, temp_zonal, "DATA", statistics_type)
+        
+        arcpy.management.Append(temp_zonal, output_table, "TEST")
+        
+        arcpy.management.Delete(temp_layer)
+        arcpy.management.Delete(temp_buffer)
+        arcpy.management.Delete(temp_zonal)
+        print("Sliver elements successfully patched and appended to zonal table.")
+
+        
+def calculate_mean_elevation(
+    workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
+    save_intermediate_outputs):
     
     """ Calculate the mean elevation of each hillslope in the discretization feature class and
         populate the parameters_hillslopes table. Called from parameterize()."""
@@ -294,8 +405,7 @@ def calculate_mean_elevation(workspace, delineation_name, discretization_name, p
     zone_field = "HillslopeID"
     value_raster = dem_raster
     zonal_table = f"intermediate_{discretization_name}_meanElevation"
-    arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, 
-                                    "DATA", "MEAN")
+    zonal_statistics(discretization_feature_class, zone_field, value_raster, zonal_table, "MEAN")
 
     table_view = "parameters_hillslopes"
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
@@ -316,15 +426,15 @@ def calculate_mean_elevation(workspace, delineation_name, discretization_name, p
         arcpy.Delete_management(zonal_table)
 
 
-def calculate_mean_slope(workspace, delineation_name, discretization_name, parameterization_name, slope_raster,
-                        save_intermediate_outputs):
+def calculate_mean_slope(
+    workspace, delineation_name, discretization_name, parameterization_name, slope_raster,
+    save_intermediate_outputs):
     parameters_hillslopes_table = os.path.join(workspace, "parameters_hillslopes")
     discretization_feature_class = os.path.join(workspace, "{}_hillslopes".format(discretization_name))
     zone_field = "HillslopeID"
     value_raster = slope_raster
     zonal_table = "intermediate_{}_meanSlope".format(discretization_name)
-    arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "DATA",
-                                    "MEAN")
+    zonal_statistics(discretization_feature_class, zone_field, value_raster, zonal_table, "MEAN")
 
     table_view = "parameters_hillslopes"
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
@@ -346,15 +456,15 @@ def calculate_mean_slope(workspace, delineation_name, discretization_name, param
         arcpy.Delete_management(zonal_table)
 
 
-def calculate_mean_aspect(workspace, delineation_name, discretization_name, parameterization_name, aspect_raster,
-                        save_intermediate_outputs):
+def calculate_mean_aspect(
+    workspace, delineation_name, discretization_name, parameterization_name, aspect_raster,
+    save_intermediate_outputs):
     parameters_hillslopes_table = os.path.join(workspace, "parameters_hillslopes")
     discretization_feature_class = os.path.join(workspace, "{}_hillslopes".format(discretization_name))
     zone_field = "HillslopeID"
     value_raster = aspect_raster
     zonal_table = "intermediate_{}_meanAspect".format(discretization_name)
-    arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "DATA",
-                                    "MEAN")
+    zonal_statistics(discretization_feature_class, zone_field, value_raster, zonal_table, "MEAN")
 
     table_view = "parameters_hillslopes"
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
@@ -378,15 +488,14 @@ def calculate_mean_aspect(workspace, delineation_name, discretization_name, para
 
 def calculate_mean_flow_length(workspace, delineation_name, discretization_name, parameterization_name,
                             save_intermediate_outputs):
-
+    
     parameters_hillslopes_table = os.path.join(workspace, "parameters_hillslopes")
     discretization_feature_class = os.path.join(workspace, "{}_hillslopes".format(discretization_name))
     flow_length_down_raster = os.path.join(workspace, "{}_flow_length_downstream".format(discretization_name))
     zone_field = "HillslopeID"
     value_raster = flow_length_down_raster
     zonal_table = "intermediate_{}_mean_flow_length_downstream".format(discretization_name)
-    arcpy.sa.ZonalStatisticsAsTable(discretization_feature_class, zone_field, value_raster, zonal_table, "DATA",
-                                    "MEAN")
+    zonal_statistics(discretization_feature_class, zone_field, value_raster, zonal_table, "MEAN")
 
     table_view = "parameters_hillslopes"
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
@@ -445,12 +554,14 @@ def calculate_centroids(workspace, delineation_name, discretization_name, parame
     arcpy.management.DeleteField(discretization_feature_class, "CentroidX;CentroidY", "DELETE_FIELDS")
 
 
-def calculate_geometries(workspace, delineation_name, discretization_name, parameterization_name, flow_length_method,
-                        save_intermediate_outputs):
+def calculate_geometries(
+    workspace, delineation_name, discretization_name, parameterization_name,
+    flow_length_method, save_intermediate_outputs):
+    # TODO: Headwater logic in Geometric Abstraction in incomplete
     hillslopes_table_name = "parameters_hillslopes"
     channels_table_name = "parameters_channels"
     parameters_hillslopes_table = os.path.join(workspace, hillslopes_table_name)
-    parameters_hillslopes_table = os.path.join(workspace, channels_table_name)
+    parameters_channels_table = os.path.join(workspace, channels_table_name)
 
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
     discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
@@ -461,11 +572,13 @@ def calculate_geometries(workspace, delineation_name, discretization_name, param
                 " {4} = '{5}'".format(delineation_name_field, delineation_name,
                                     discretization_name_field, discretization_name,
                                     parameterization_name_field, parameterization_name)
+    
     if flow_length_method == "Geometric Abstraction":
         hillslopes_fields = ["HillslopeID", "Area", "Width", "Length"]
         channels_fields = ["ChannelLength"]
 
-        with arcpy.da.UpdateCursor(parameters_hillslopes_table, hillslopes_fields, expression) as hillslopes_cursor:
+        with arcpy.da.UpdateCursor(
+            parameters_hillslopes_table, hillslopes_fields, expression) as hillslopes_cursor:
             for hillslope_row in hillslopes_cursor:
                 hillslope_id = hillslope_row[0]
                 area = hillslope_row[1]
@@ -477,7 +590,7 @@ def calculate_geometries(workspace, delineation_name, discretization_name, param
                                                 discretization_name_field, discretization_name,
                                                 parameterization_name_field, parameterization_name,
                                                 channel_id_field, channel_id)
-                with arcpy.da.SearchCursor(parameters_hillslopes_table, channels_fields, expression) as channels_cursor:
+                with arcpy.da.SearchCursor(parameters_channels_table, channels_fields, expression) as channels_cursor:
                     for stream_row in channels_cursor:
                         if hillslope_id % 10 == 2 or hillslope_id % 10 == 3:
                             width = stream_row[0]
@@ -490,6 +603,7 @@ def calculate_geometries(workspace, delineation_name, discretization_name, param
                             #  and use its centroid
                             width = stream_row[0]
                             length = area / width
+    
     elif flow_length_method == "Plane Average":
         table_name = "parameters_hillslopes"
         parameters_hillslopes_table = os.path.join(workspace, table_name)
@@ -508,8 +622,18 @@ def calculate_geometries(workspace, delineation_name, discretization_name, param
         mean_flow_length_field = arcpy.AddFieldDelimiters(workspace, "MeanFlowLength")
         width_field = arcpy.AddFieldDelimiters(workspace, "Width")
         length_field = arcpy.AddFieldDelimiters(workspace, "Length")
-        arcpy.management.CalculateField(table_view, width_field, "!{0}! / !{1}!".
-                                        format(area_field, mean_flow_length_field), "PYTHON3")
+
+        with arcpy.da.UpdateCursor(table_view, [width_field, area_field, mean_flow_length_field]) as cursor:
+            for row in cursor:
+                width = row[0]
+                area = row[1]
+                mean_flow_length = row[2]
+                if area is not None and mean_flow_length is not None and mean_flow_length != 0:
+                    row[0] = area / mean_flow_length
+                    cursor.updateRow(row)           
+                else:
+                    raise ValueError(f"Area or mean flow length is None or zero for row {row}")                         
+
         arcpy.management.CalculateField(table_view, length_field, "!{}!".format(mean_flow_length_field), "PYTHON3")
         arcpy.management.Delete(table_view)
 
@@ -541,20 +665,21 @@ def calculate_stream_length(workspace, delineation_name, discretization_name, pa
 
 def calculate_stream_sequence(workspace, delineation_name, discretization_name, parameterization_name,
                             save_intermediate_outputs):    
-    # TODO: Replace function comments with docstring style comments
-    # Outlet stream has highest sequence
-    # Identify outlet using discretization nodes feature class where node_type = 'outlet'
-    # Query for stream outlet and push on to unprocessedStack
-    # While unprocessedStack is not empty
-    #   peek at unprocessedStack to get streamID
-    #   If channelsList has current streamID
-    #       push stream ID on to processedStack
-    #   Add streamID to channelsList
-    #   query for streams contributing to streamID
-    #       If no contributing streams
-    #           push top of unprocessedStack onto processedStack
-    #       while contributing streams
-    #           push contributing stream onto unProcessedStack
+    """
+    Assign a processing sequence number to each channel, starting from the 
+    watershed outlet and working upstream.
+
+    The outlet channel receives the highest sequence number. Headwater channels
+    receive the lowest numbers. Sequence is later used by 
+    calculate_contributing_area_k2 so that upstream areas are already known 
+    when a downstream channel is processed.
+
+    Algorithm outline:
+    1. Locate the outlet node (node_type = 'outlet').
+    2. Use a stack-based traversal to walk the channel network upstream.
+    3. Record channels in reverse order of discovery.
+    4. Write the resulting sequence numbers into the parameters_channels table.
+    """
 
     # Identify outlet using node_type = 'outlet'
     discretization_nodes = f"{discretization_name}_nodes"
@@ -639,15 +764,26 @@ def calculate_stream_sequence(workspace, delineation_name, discretization_name, 
     arcpy.management.Delete(contrib_table_view)
 
 
-def calculate_contributing_area_k2(workspace, delineation_name, discretization_name, parameterization_name,
-                                save_intermediate_outputs):
-    # TODO: Replace function comments with docstring style comments
-    # Calculate contributing areas by starting at the top of the watershed
-    # and moving towards the outlet
-    # Iterate through parameters_channels by sequence number
-    # This results in the headwater areas being calculated first
-    # so moving towards the outlet the upstream contributing areas
-    # can be added
+def calculate_contributing_area_k2(
+    workspace, delineation_name, discretization_name, parameterization_name,
+    save_intermediate_outputs):
+    """
+    Calculate lateral and upstream contributing areas for each channel.
+
+    Channels are processed in ascending Sequence order (headwaters first, 
+    outlet last). This ensures that when a downstream channel is processed, 
+    the LateralArea and UpstreamArea of all contributing upstream channels 
+    have already been calculated and can be summed.
+
+    For each channel the function:
+    - Sums the areas of the left and right lateral hillslopes.
+    - If the channel has a headwater hillslope, uses that area as UpstreamArea.
+    - Otherwise sums (LateralArea + UpstreamArea) of all channels that flow 
+      into it (looked up from the contributing_channels table).
+
+    Results are written to the LateralArea and UpstreamArea fields of the 
+    parameters_channels table.
+    """
     
     parameters_channels_table_name = "parameters_channels"
     parameters_channels_table = os.path.join(workspace, parameters_channels_table_name)
@@ -669,7 +805,8 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
             discretization_name_field, discretization_name,
             parameterization_name_field, parameterization_name)
     parameters_hillslopes_table_view = "{}_tableview".format(parameters_hillslopes_table)
-    arcpy.management.MakeTableView(parameters_hillslopes_table, parameters_hillslopes_table_view, expression)
+    arcpy.management.MakeTableView(
+        parameters_hillslopes_table, parameters_hillslopes_table_view, expression)
 
     contributing_channels_table_name = "contributing_channels"
     contributing_channels_table = os.path.join(workspace, contributing_channels_table_name)
@@ -689,7 +826,8 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
     fields_cursor4 = ["LateralArea", "UpstreamArea"]
     for sequence in range(1, channel_count + 1):
         expression = "{0} = {1}".format(sequence_field, sequence)
-        with arcpy.da.UpdateCursor(parameters_channels_table_view, fields_cursor1, expression) as cursor:
+        with arcpy.da.UpdateCursor(
+            parameters_channels_table_view, fields_cursor1, expression) as cursor:
             for row in cursor:
                 channel_id = row[0]
                 left_lateral_id = channel_id - 1
@@ -714,7 +852,6 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
                 with arcpy.da.SearchCursor(parameters_hillslopes_table_view, fields_cursor2,
                                         expression) as hillslopes_cursor:
                     for hillslope_row in hillslopes_cursor:
-                        # print("lateral area: ", str(hillslope_row[0]))
                         lateral_area += hillslope_row[0]
                 # Determine headwater_area
                 expression = "{0} = '{1}' And " \
@@ -727,7 +864,6 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
                 with arcpy.da.SearchCursor(parameters_hillslopes_table_view, fields_cursor2,
                                         expression) as hillslopes_cursor:
                     for hillslope_row in hillslopes_cursor:
-                        # print("headwater area: ", str(hillslope_row[0]))
                         headwater_area = hillslope_row[0]
 
                 # Determine upstream_area
@@ -740,8 +876,9 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
 
                     expression2 = expression2[:-4]
                     upstream_area = 0
-                    with arcpy.da.SearchCursor(parameters_channels_table_view, fields_cursor4, expression2) as \
-                            contrib_cursor:
+                    with arcpy.da.SearchCursor(
+                        parameters_channels_table_view, fields_cursor4, expression2
+                        ) as contrib_cursor:
                         for contrib_row in contrib_cursor:
                             upstream_area += contrib_row[0] + contrib_row[1]
 
@@ -758,221 +895,159 @@ def calculate_contributing_area_k2(workspace, delineation_name, discretization_n
     arcpy.management.Delete(parameters_hillslopes_table_view)
 
 
-def calculate_stream_slope(workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
-                        save_intermediate_outputs):
-    parameters_channels_table_name = "parameters_channels"
-    parameters_channels_table = os.path.join(workspace, parameters_channels_table_name)
-    discretization_channels = "{}_channels".format(discretization_name)
-    channels_feature_class = os.path.join(workspace, discretization_channels)
-
-    # channels table view of input delineation, discretization, and parameterization
-    delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
-    discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
-    parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
-    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
-                                                                    discretization_name_field,
-                                                                    discretization_name,
-                                                                    parameterization_name_field,
-                                                                    parameterization_name)
-    parameters_channels_table_view = "{}_tableview".format(parameters_channels_table_name)
-    arcpy.management.MakeTableView(parameters_channels_table, parameters_channels_table_view, expression)
-
-    arcpy.management.AddFields(channels_feature_class, "UpstreamX FLOAT # # # #;UpstreamY FLOAT # # # #;"
-                                                    "DownstreamX FLOAT # # # #;DownstreamY FLOAT # # # #"
-                                                    "CentroidX FLOAT # # # #;CentroidY FLOAT # # # #;", None)
-
-    arcpy.management.CalculateGeometryAttributes(channels_feature_class,
-                                                "UpstreamX LINE_START_X;""UpstreamY LINE_START_Y;"
-                                                "DownstreamX LINE_END_X;""DownstreamY LINE_END_Y;"
-                                                "CentroidX CENTROID_X;""CentroidY CENTROID_Y",
-                                                '', '', None, "SAME_AS_INPUT")
-
-    # Join
-    arcpy.management.AddJoin(parameters_channels_table_view, "ChannelID", channels_feature_class, "ChannelID")
-
-    # Calculate centroid
-    centroid_x_field = "{0}.{1}".format(parameters_channels_table_name, "CentroidX")
-    centroid_y_field = "{0}.{1}".format(parameters_channels_table_name, "CentroidY")
-    channels_centroid_x_field = "{0}.{1}".format(discretization_channels, "CentroidX")
-    channels_centroid_y_field = "{0}.{1}".format(discretization_channels, "CentroidY")
-    calculate_expression = "{0} !{1}!;{2} !{3}!".format(centroid_x_field, channels_centroid_x_field,
-                                                        centroid_y_field, channels_centroid_y_field)
-    arcpy.management.CalculateFields(parameters_channels_table_view, "PYTHON3",
-                                    calculate_expression, '', "NO_ENFORCE_DOMAINS")
-
-    # Remove join
-    arcpy.management.RemoveJoin(parameters_channels_table_view, discretization_channels)
-
-    # XY Table To Point
-    channels_spatial_ref = arcpy.Describe(channels_feature_class).spatialReference
-    upstream_points_name = "{}_XY_upstream".format(discretization_name)
-    upstream_points_feature_class = os.path.join(workspace, upstream_points_name)
-    arcpy.management.XYTableToPoint(channels_feature_class,
-                                    upstream_points_feature_class,
-                                    "UpstreamX", "UpstreamY", None, channels_spatial_ref)
-
-    # Sample
-    sample_upstream_name = "{}_sample_upstream".format(discretization_name)
-    sample_upstream_table = os.path.join(workspace, sample_upstream_name)
-    arcpy.sa.Sample(dem_raster, upstream_points_feature_class,
-                    sample_upstream_table, "NEAREST", "ChannelID",
-                    "CURRENT_SLICE", None, '', None, None, "ROW_WISE", "TABLE")
-
-    # XY Table To Point
-    downstream_points_name = "{}_XY_downstream".format(discretization_name)
-    downstream_points_feature_class = os.path.join(workspace, downstream_points_name)
-    arcpy.management.XYTableToPoint(channels_feature_class,
-                                    downstream_points_feature_class,
-                                    "DownstreamX", "DownstreamY", None, channels_spatial_ref)
-
-    # Sample
-    sample_downstream_name = "{}_sample_downstream".format(discretization_name)
-    sample_downstream_table = os.path.join(workspace, sample_downstream_name)
-    arcpy.sa.Sample(dem_raster, downstream_points_feature_class,
-                    sample_downstream_table, "NEAREST", "ChannelID",
-                    "CURRENT_SLICE", None, '', None, None, "ROW_WISE", "TABLE")
-
-    # Add Join
-    join_field = "ChannelID"
-    arcpy.management.AddJoin(parameters_channels_table_view, join_field, sample_upstream_name,
-                            upstream_points_name, "KEEP_ALL", "NO_INDEX_JOIN_FIELDS")
-
-    # Add Join
-    join_field = "{0}.{1}".format(parameters_channels_table_name, "ChannelID")
-    arcpy.management.AddJoin(parameters_channels_table_view, join_field, sample_downstream_name,
-                            downstream_points_name, "KEEP_ALL", "NO_INDEX_JOIN_FIELDS")
-
-    # Calculate Fields    
-    dem_path, dem_name = os.path.split(dem_raster)
-    upstream_field = "{0}.{1}".format(parameters_channels_table_name, "UpstreamElevation")
-    downstream_field = "{0}.{1}".format(parameters_channels_table_name, "DownstreamElevation")
-    sample_upstream_field = get_table_field_name(sample_upstream_table, dem_name)
-    sample_downstream_field = get_table_field_name(sample_downstream_table, dem_name)
-    calculate_expression = "{0} !{1}!;{2} !{3}!".format(upstream_field, sample_upstream_field,
-                                                        downstream_field, sample_downstream_field)
-    arcpy.management.CalculateFields(parameters_channels_table_view, "PYTHON3",
-                                    calculate_expression,
-                                    '', "NO_ENFORCE_DOMAINS")
-    # Remove Join in reverse order
-    arcpy.management.RemoveJoin(parameters_channels_table_view, sample_downstream_name)
-    arcpy.management.RemoveJoin(parameters_channels_table_view, sample_upstream_name)
- 
-    # Calculate Field with minimum threshold
-    arcpy.management.CalculateField(parameters_channels_table_view, "MeanSlope",
-                                    "max(0.0001, (!UpstreamElevation! - !DownstreamElevation!) / !ChannelLength!)",
-                                    "PYTHON3", '', "DOUBLE", "NO_ENFORCE_DOMAINS")
-
-    arcpy.management.Delete(parameters_channels_table_view)
-    arcpy.management.DeleteField(channels_feature_class,
-                                "UpstreamX;UpstreamY;DownstreamX;DownstreamY;CentroidX;CentroidY",
-                                "DELETE_FIELDS")
-    if not save_intermediate_outputs:
-        arcpy.management.Delete(upstream_points_feature_class)
-        arcpy.management.Delete(downstream_points_feature_class)
-        arcpy.management.Delete(sample_upstream_table)
-        arcpy.management.Delete(sample_downstream_table)
-
-
-def get_table_field_name(table, dem_name):
-    # depends on whether the raster is a multiband or single band raster, 
-    # sample_upstream_field and sample_downstream_field will be created with a different field name
-
-    # First, in case if dem rasster is an .img file, remove the file extension
-    field_names = [f.name for f in arcpy.ListFields(table)]
-    tale_name = os.path.basename(table)
-
-    possible_names = [dem_name, f"{dem_name}_Band_1", f"{dem_name}_Layer_1"]
-    for name in possible_names:
-        if name in field_names:
-            return f"{tale_name}.{name}"
-    raise ValueError(f"None of {possible_names} found in {table}")
+def calculate_stream_slope(
+    workspace, delineation_name, discretization_name, parameterization_name, dem_raster,
+    save_intermediate_outputs):
     
+    parameters_channels_table = os.path.join(workspace, "parameters_channels")
+    channels_feature_class = os.path.join(workspace, "{}_channels".format(discretization_name))
+    endpoints_name = "{}_channel_endpoints".format(discretization_name)
+    endpoints_feature_class = os.path.join(workspace, endpoints_name)
+    elevation_field = "ELEV"
 
-def calculate_stream_geometries(workspace, delineation_name, discretization_name, parameterization_name,
-                                hydraulic_geometry_relationship, agwa_directory, save_intermediate_outputs):
-    parameters_channels_table_name = "parameters_channels"
-    parameters_channels_table = os.path.join(workspace, parameters_channels_table_name)
+    # read channel endpoints and centroids directly from geometry.
+    cell_size = arcpy.Raster(dem_raster).meanCellWidth
+    nudge = 0.01 * cell_size
+    channel_geometry = {}
+    with arcpy.da.SearchCursor(channels_feature_class, ["ChannelID", "SHAPE@"]) as cursor:
+        for channel_id, shape in cursor:
+            if shape is None:
+                continue
+            offset = min(nudge, shape.length / 2.0)
+            upstream_point = shape.positionAlongLine(offset).firstPoint
+            downstream_point = shape.positionAlongLine(shape.length - offset).firstPoint
+            channel_geometry[channel_id] = (upstream_point, downstream_point, shape.trueCentroid)
 
-    # channels table view of input delineation, discretization, and parameterization
+    # one point feature class holding both ends of every channel.
+    if arcpy.Exists(endpoints_feature_class):
+        arcpy.management.Delete(endpoints_feature_class)
+    spatial_ref = arcpy.Describe(channels_feature_class).spatialReference
+    arcpy.management.CreateFeatureclass(
+        workspace, endpoints_name, "POINT", spatial_reference=spatial_ref)
+    arcpy.management.AddFields(endpoints_feature_class,
+                               [["ChannelID", "LONG"], ["EndType", "TEXT", "", 2]])
+
+    with arcpy.da.InsertCursor(
+        endpoints_feature_class, ["ChannelID", "EndType", "SHAPE@XY"]) as cursor:
+        for channel_id, (first, last, _) in channel_geometry.items():
+            cursor.insertRow((channel_id, "UP", (first.X, first.Y)))
+            cursor.insertRow((channel_id, "DN", (last.X, last.Y)))
+
+    arcpy.sa.ExtractMultiValuesToPoints(
+        endpoints_feature_class, [[dem_raster, elevation_field]], "NONE")
+
+    elevations = {}
+    with arcpy.da.SearchCursor(
+        endpoints_feature_class, ["ChannelID", "EndType", elevation_field]) as cursor:
+        for channel_id, end_type, elevation in cursor:
+            elevations[(channel_id, end_type)] = elevation
+
+    # write elevations, centroid and slope to the parameters table in one pass.
     delineation_name_field = arcpy.AddFieldDelimiters(workspace, "DelineationName")
     discretization_name_field = arcpy.AddFieldDelimiters(workspace, "DiscretizationName")
     parameterization_name_field = arcpy.AddFieldDelimiters(workspace, "ParameterizationName")
-    expression = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(delineation_name_field, delineation_name,
-                                                                    discretization_name_field,
-                                                                    discretization_name,
-                                                                    parameterization_name_field,
-                                                                    parameterization_name)
-    parameters_channels_table_view = "{}_tableview".format(parameters_channels_table_name)
+    where_clause = "{0} = '{1}' And {2} = '{3}' And {4} = '{5}'".format(
+        delineation_name_field, delineation_name,
+        discretization_name_field, discretization_name,
+        parameterization_name_field, parameterization_name)
+
+    fields = ["ChannelID", "UpstreamElevation", "DownstreamElevation", "ChannelLength",
+              "MeanSlope", "CentroidX", "CentroidY"]
+    missing_elevation = []
+    with arcpy.da.UpdateCursor(parameters_channels_table, fields, where_clause) as cursor:
+        for row in cursor:
+            channel_id = row[0]
+            up_elev = elevations.get((channel_id, "UP"))
+            dn_elev = elevations.get((channel_id, "DN"))
+            if up_elev is None or dn_elev is None:
+                missing_elevation.append(channel_id)
+                continue
+            
+            length = row[3] if row[3] else 0.0001
+            row[4] = max(0.0001, (up_elev - dn_elev) / length)
+
+            geometry = channel_geometry.get(channel_id)
+            if geometry is not None:
+                row[5] = geometry[2].X
+                row[6] = geometry[2].Y
+
+            cursor.updateRow(row)
+
+    if missing_elevation:
+        missing_ids = ", ".join(str(c) for c in missing_elevation)
+        raise ValueError(
+            f"No DEM value at channel endpoint(s) for ChannelID {missing_ids}; "
+            f"check DEM raster and channel endpoints.")
+
+    if not save_intermediate_outputs:
+        arcpy.management.Delete(endpoints_feature_class)
+
+
+def calculate_stream_geometries(
+    workspace, delineation_name, discretization_name, parameterization_name,
+    hydraulic_geometry_relationship, agwa_directory, save_intermediate_outputs):
+    parameters_channels_table_name = "parameters_channels"
+    parameters_channels_table = os.path.join(workspace, parameters_channels_table_name)
+
+    expression = (f"DelineationName = '{delineation_name}' And "
+                  f"DiscretizationName = '{discretization_name}' And "
+                  f"ParameterizationName = '{parameterization_name}'")
+    
+    parameters_channels_table_view = f"{parameters_channels_table_name}_tableview"
     arcpy.management.MakeTableView(parameters_channels_table, parameters_channels_table_view, expression)
 
-    # Acquire channel width and depth coefficients and exponents from the hydraulic geometry relationship table
+    # ---- HGR coefficients ----
     datafiles_directory = os.path.join(agwa_directory, "lookup_tables.gdb")
     hgr_table = os.path.join(datafiles_directory, "HGR")
 
-    width_coefficient = None
-    width_exponent = None
-    depth_coefficient = None
-    depth_exponent = None
+    width_coefficient = width_exponent = depth_coefficient = depth_exponent = None
     fields = ["wCoef", "wExp", "dCoef", "dExp"]
-    name_field = arcpy.AddFieldDelimiters(workspace, "HGRNAME")
-    expression = "{0} = '{1}'".format(name_field, hydraulic_geometry_relationship)
-    with arcpy.da.SearchCursor(hgr_table, fields, expression) as cursor:
+    hgr_expression = f"HGRNAME = '{hydraulic_geometry_relationship}'"
+    
+    with arcpy.da.SearchCursor(hgr_table, fields, hgr_expression) as cursor:
         for row in cursor:
-            width_coefficient = row[0]
-            width_exponent = row[1]
-            depth_coefficient = row[2]
-            depth_exponent = row[3]
+            width_coefficient, width_exponent, depth_coefficient, depth_exponent = row
+            break
+            
 
-    # Calculate side slopes first so they can be used to calculate bottom width of channel from bank full depth
-    side_slope1 = 1
-    side_slope2 = 1
-    side_slope1_field = arcpy.AddFieldDelimiters(workspace, "SideSlope1")
-    side_slope2_field = arcpy.AddFieldDelimiters(workspace, "SideSlope2")
-    expression = "{0} {1};{2} {3}".format(side_slope1_field, side_slope1, side_slope2_field, side_slope2)
-    arcpy.management.CalculateFields(parameters_channels_table_view, "PYTHON3",
-                                    expression, '', "NO_ENFORCE_DOMAINS")
+    if None in (width_coefficient, width_exponent, depth_coefficient, depth_exponent):
+        raise ValueError(f"HGR '{hydraulic_geometry_relationship}' not found or incomplete in {hgr_table}")
 
-    upstream_bankfull_depth_field = arcpy.AddFieldDelimiters(workspace, "UpstreamBankfullDepth")
-    downstream_bankfull_depth_field = arcpy.AddFieldDelimiters(workspace, "DownstreamBankfullDepth")
-    upstream_bankfull_width_field = arcpy.AddFieldDelimiters(workspace, "UpstreamBankfullWidth")
-    downstream_bankfull_width_field = arcpy.AddFieldDelimiters(workspace, "DownstreamBankfullWidth")
-    upstream_bottom_width_field = arcpy.AddFieldDelimiters(workspace, "UpstreamBottomWidth")
-    downstream_bottom_width_field = arcpy.AddFieldDelimiters(workspace, "DownstreamBottomWidth")
-    # upstream bankfull depth calculation
-    # expression = "{0} * math.pow(!UpstreamArea!, {1})".format(depth_coefficient, depth_exponent)
-    expression = "{0} * !UpstreamArea! ** {1}".format(depth_coefficient, depth_exponent)
-    arcpy.management.CalculateField(parameters_channels_table_view, upstream_bankfull_depth_field,
-                                    expression, "PYTHON3", '', "TEXT",
-                                    "NO_ENFORCE_DOMAINS")
-    # downstream bankfull depth calculation
-    # expression = "{0} * math.pow(!UpstreamArea! + !LateralArea!, {1})".format(depth_coefficient, depth_exponent)
-    expression = "{0} * (!UpstreamArea! + !LateralArea!) * {1}".format(depth_coefficient, depth_exponent)
-    arcpy.management.CalculateField(parameters_channels_table_view, downstream_bankfull_depth_field,
-                                    expression, "PYTHON3", '', "TEXT",
-                                    "NO_ENFORCE_DOMAINS")
-    # upstream bankfull width calculation
-    # expression = "{0} * math.pow(!UpstreamArea!, {1})".format(width_coefficient, width_exponent)
-    expression = "{0} * !UpstreamArea! ** {1}".format(width_coefficient, width_exponent)
-    arcpy.management.CalculateField(parameters_channels_table_view, upstream_bankfull_width_field,
-                                    expression, "PYTHON3", '', "TEXT",
-                                    "NO_ENFORCE_DOMAINS")
-    # downstream bankfull width calculation
-    # expression = "{0} * math.pow(!UpstreamArea! + !LateralArea!, {1})".format(width_coefficient, width_exponent)
-    expression = "{0} * (!UpstreamArea! + !LateralArea!) ** {1}".format(width_coefficient, width_exponent)
-    arcpy.management.CalculateField(parameters_channels_table_view, downstream_bankfull_width_field,
-                                    expression, "PYTHON3", '', "TEXT",
-                                    "NO_ENFORCE_DOMAINS")
+    # ---- Side slopes (numeric) ----
+    with arcpy.da.UpdateCursor(parameters_channels_table_view, ["SideSlope1", "SideSlope2"]) as cursor:
+        for row in cursor:
+            row[0] = 1.0
+            row[1] = 1.0
+            cursor.updateRow(row)
 
-    # upstream bottom width calculation
-    expression = "!UpstreamBankfullWidth! - !UpstreamBankfullDepth! * (1/!SideSlope1! + 1/!SideSlope2!)"
-    arcpy.management.CalculateField(parameters_channels_table_view, upstream_bottom_width_field,
-                                    expression, "PYTHON3", '', "TEXT",
-                                    "NO_ENFORCE_DOMAINS")
-    # downstream bottom width calculation
-    expression = "!DownstreamBankfullWidth! - !UpstreamBankfullDepth! * (1/!SideSlope1! + 1/!SideSlope2!)"
-    arcpy.management.CalculateField(parameters_channels_table_view, downstream_bottom_width_field,
-                                    expression, "PYTHON3", '', "TEXT",
-                                    "NO_ENFORCE_DOMAINS")
+    # Now calculate all geometry fields in pure Python
+    fields = [
+        "UpstreamArea", "LateralArea",
+        "SideSlope1", "SideSlope2",
+        "UpstreamBankfullDepth", "DownstreamBankfullDepth",
+        "UpstreamBankfullWidth", "DownstreamBankfullWidth",
+        "UpstreamBottomWidth", "DownstreamBottomWidth"
+    ]
+
+    with arcpy.da.UpdateCursor(parameters_channels_table_view, fields) as cursor:
+        for row in cursor:
+            up_area   = row[0] if row[0] is not None else 0.0
+            lat_area  = row[1] if row[1] is not None else 0.0
+            ss1       = row[2] if row[2] is not None else 1.0
+            ss2       = row[3] if row[3] is not None else 1.0
+
+            # Bankfull depth & width
+            row[4] = depth_coefficient * (up_area ** depth_exponent)                          # UpstreamBankfullDepth
+            row[5] = depth_coefficient * ((up_area + lat_area) ** depth_exponent)             # DownstreamBankfullDepth
+            row[6] = width_coefficient * (up_area ** width_exponent)                          # UpstreamBankfullWidth
+            row[7] = width_coefficient * ((up_area + lat_area) ** width_exponent)             # DownstreamBankfullWidth
+
+            # Bottom widths
+            row[8] = row[6] - row[4] * (1.0/ss1 + 1.0/ss2)                                   # UpstreamBottomWidth
+            row[9] = row[7] - row[5] * (1.0/ss1 + 1.0/ss2)                                   # DownstreamBottomWidth
+
+            cursor.updateRow(row)
+
 
 
 def create_parameter_tables(workspace):
@@ -1028,8 +1103,9 @@ def create_parameter_tables(workspace):
         arcpy.management.AddFields(stream_table_name, fields)
 
 
-def calculate_complex_slope(workspace, agwa_directory, delineation_name, discretization, parameterization_name, slope_raster,
-                                fa_raster, flow_length_raster, save_intermediate_outputs):
+def calculate_complex_slope(
+    workspace, agwa_directory, delineation_name, discretization, parameterization_name,
+    slope_raster, fa_raster, flow_length_raster, save_intermediate_outputs):
     # collect inputs to flan.exe: area, flowdown, flow length, slope, stream link
 
     flow_down = os.path.join(workspace, f"{discretization}_flow_length_downstream")
@@ -1044,9 +1120,11 @@ def read_extract_parameters(prjgdb, delineation_name, discretization_name, param
     # Extract variables from parameterization table
     meta_parameterization_table = os.path.join(prjgdb, "metaParameterization")
     df_meta_parameterization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_parameterization_table, "*"))
-    df_parameterization = df_meta_parameterization[(df_meta_parameterization.DelineationName == delineation_name) &
+    df_parameterization = df_meta_parameterization[
+        (df_meta_parameterization.DelineationName == delineation_name) &
         (df_meta_parameterization.DiscretizationName == discretization_name) &
-        (df_meta_parameterization.ParameterizationName == parameterization_name)].to_dict("records")[0]
+        (df_meta_parameterization.ParameterizationName == parameterization_name)
+        ].to_dict("records")[0]
     flow_length_method = df_parameterization["FlowLengthMethod"]
     hgr_method = df_parameterization["HydraulicGeometryRelationship"]
     slope_method = df_parameterization["SlopeType"]
@@ -1066,5 +1144,5 @@ def read_extract_parameters(prjgdb, delineation_name, discretization_name, param
         flow_length_raster = df_workspace['FlowLengthPath']
 
 
-    return (unfilled_dem_raster, slope_raster, aspect_raster, agwa_directory, flow_length_method, hgr_method, 
-            slope_method, fa_raster, flow_length_raster)
+    return (unfilled_dem_raster, slope_raster, aspect_raster, agwa_directory, 
+            flow_length_method, hgr_method, slope_method, fa_raster, flow_length_raster)
