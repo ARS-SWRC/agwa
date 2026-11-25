@@ -2,6 +2,21 @@ import os
 import arcpy
 from pathlib import Path
 
+def add_identity_fields(feature_class, identity):
+    """Add text fields recording which run the results came from, and fill every row.
+
+    identity: list of (field_name, alias, value). Called before JoinField so these
+    fields sit between the base fields and the result fields.
+    """
+    for name, alias, _ in identity:
+        if not arcpy.ListFields(feature_class, name):
+            arcpy.management.AddField(feature_class, name, "TEXT", field_length=255, field_alias=alias)
+    with arcpy.da.UpdateCursor(feature_class, [name for name, _, _ in identity]) as cursor:
+        values = [value for _, _, value in identity]
+        for _ in cursor:
+            cursor.updateRow(values)
+
+
 class JoinResults(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -176,72 +191,78 @@ class JoinResults(object):
 
         return
 
-    def process_join(self, simulation_name, delineation, discretization, workspace):
-        """Join the simulation results to the discretization feature class."""
+    # Fields in k2_results that identify a run or record bookkeeping; they are not
+    # copied onto the result feature classes.
+    NON_RESULT_FIELDS = {"objectid", "element_id", "element_type", "delineationname",
+                         "discretizationname", "parameterizationname", "simulationname",
+                         "outfilename", "creationdate", "agwaversionatcreation",
+                         "agwagdbversionatcreation", "status"}
 
-        temp_table = os.path.join(workspace, "k2_results_temp")
-        temp_lyr = "temp_discretization_lyr"
+    def process_join(self, simulation_name, delineation, discretization, workspace):
+        """Copy the discretization feature classes and attach this simulation's results.
+
+        Uses JoinField (a permanent attribute join) instead of AddJoin + CopyFeatures,
+        so the output fields keep their original names (e.g. Peak_Flow_mmhr) rather
+        than table-qualified names (e.g. k2_results_temp_Peak_Flow_mmhr).
+        """
+
+        view = "k2_results_join_view"
 
         try:
-            # Paths
             disc_hillslopes = os.path.join(workspace, f"{discretization}_hillslopes")
             disc_channels   = os.path.join(workspace, f"{discretization}_channels")
             out_hillslope   = os.path.join(workspace, f"k2_results_hillslope_{simulation_name}")
             out_channel     = os.path.join(workspace, f"k2_results_channel_{simulation_name}")
-            join_table      = os.path.join(workspace, "k2_results")
+            results_table   = os.path.join(workspace, "k2_results")
 
-            # 1. Create filtered temporary table
-            where_clause = (
-                f"DelineationName = '{delineation}' AND "
-                f"DiscretizationName = '{discretization}' AND "
-                f"SimulationName = '{simulation_name}'"
-            )
-
-            if arcpy.Exists("join_table_view"):
-                arcpy.management.Delete("join_table_view")
-
-            arcpy.management.MakeTableView(join_table, "join_table_view", where_clause)
-
-            if arcpy.Exists(temp_table):
-                arcpy.management.Delete(temp_table)
-
-            arcpy.management.CopyRows("join_table_view", temp_table)
-            arcpy.management.Delete("join_table_view")
+            result_fields = [f.name for f in arcpy.ListFields(results_table)
+                             if f.type not in ("OID", "Geometry")
+                             and f.name.lower() not in self.NON_RESULT_FIELDS]
 
             arcpy.AddMessage(f"Joining simulation '{simulation_name}':")
 
-            # 2. Join and export for hillslopes + channels
             targets = [
-                (disc_hillslopes, "HillslopeID", out_hillslope),
-                (disc_channels,   "ChannelID",   out_channel),
+                (disc_hillslopes, "HillslopeID", "Hillslope", out_hillslope),
+                (disc_channels,   "ChannelID",   "Channel",   out_channel),
             ]
 
-            for layer_path, field, out_fc in targets:
-                if not arcpy.Exists(layer_path):
-                    arcpy.AddWarning(f"Target feature class does not exist: {layer_path}")
+            for base_fc, key_field, element_type, out_fc in targets:
+                if not arcpy.Exists(base_fc):
+                    arcpy.AddWarning(f"Target feature class does not exist: {base_fc}")
                     continue
 
-                if arcpy.Exists(temp_lyr):
-                    arcpy.management.Delete(temp_lyr)
+                # Results for this simulation and element type only
+                where_clause = (
+                    f"DelineationName = '{delineation}' AND "
+                    f"DiscretizationName = '{discretization}' AND "
+                    f"SimulationName = '{simulation_name}' AND "
+                    f"Element_Type = '{element_type}'"
+                )
+                if arcpy.Exists(view):
+                    arcpy.management.Delete(view)
+                arcpy.management.MakeTableView(results_table, view, where_clause)
 
-                arcpy.management.MakeFeatureLayer(layer_path, temp_lyr)
-                arcpy.management.AddJoin(temp_lyr, field, temp_table, "Element_ID", "KEEP_ALL")
-                arcpy.AddMessage(f"   Join performed on {os.path.basename(layer_path)} with field {field}.")
+                # Parameterization used by this simulation (from its result rows)
+                with arcpy.da.SearchCursor(view, ["ParameterizationName"]) as cursor:
+                    parameterizations = sorted({row[0] for row in cursor if row[0]})
+                parameterization = "; ".join(parameterizations)
 
+                # Fresh copy of the base geometry, record the run, then attach the result fields
                 if arcpy.Exists(out_fc):
                     arcpy.management.Delete(out_fc)
+                arcpy.management.CopyFeatures(base_fc, out_fc)
+                add_identity_fields(out_fc, [
+                    ("DelineationName", "Delineation Name", delineation),
+                    ("DiscretizationName", "Discretization Name", discretization),
+                    ("ParameterizationName", "Parameterization Name", parameterization),
+                    ("SimulationName", "Simulation Name", simulation_name),
+                ])
+                arcpy.management.JoinField(out_fc, key_field, view, "Element_ID", result_fields)
+                arcpy.AddMessage(f"   Results joined to {os.path.basename(out_fc)} on {key_field}.")
 
-                arcpy.management.CopyFeatures(temp_lyr, out_fc)
-                arcpy.AddMessage(f"   Joined data exported to {out_fc}.")
+                arcpy.management.Delete(view)
 
-                # Clean up the temporary layer (removes the join as well)
-                arcpy.management.Delete(temp_lyr)
-
-            # 3. Clean up temp table
-            if arcpy.Exists(temp_table):
-                arcpy.management.Delete(temp_table)
-
-            # 4. Add results to the map (remove old ones first)
+            # Add results to the map (remove old ones first)
             aprx = arcpy.mp.ArcGISProject("CURRENT")
             m = aprx.activeMap
 
@@ -266,15 +287,9 @@ class JoinResults(object):
             arcpy.AddError(traceback.format_exc())
 
         finally:
-            for name in ["join_table_view", temp_lyr]:
-                if arcpy.Exists(name):
-                    try:
-                        arcpy.management.Delete(name)
-                    except Exception:
-                        pass
-            if arcpy.Exists(temp_table):
+            if arcpy.Exists(view):
                 try:
-                    arcpy.management.Delete(temp_table)
+                    arcpy.management.Delete(view)
                 except Exception:
                     pass
 
