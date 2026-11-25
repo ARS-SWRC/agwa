@@ -1,10 +1,21 @@
 import os
+import re
 import sys
 import arcpy
 import importlib
 sys.path.append(os.path.dirname(__file__))
 import code_compare_simulation_results as agwa
 importlib.reload(agwa)
+
+
+def comparison_prefix(method):
+    """Return the name prefix for a comparison method: k2diffr_ (relative) or k2diffa_ (absolute)."""
+    return "k2diffr_" if method and method[:3].lower() == "rel" else "k2diffa_"
+
+
+def default_comparison_name(method, base_simulation, target_simulation):
+    """Return the default comparison name, e.g. k2diffr_<pre>_<post>."""
+    return f"{comparison_prefix(method)}{base_simulation}_{target_simulation}"
 
 
 class CompareSimulationResults(object):
@@ -63,7 +74,8 @@ class CompareSimulationResults(object):
                                  datatype="GPBoolean",
                                  parameterType="Optional",
                                  direction="Input")
-    
+        param5.value = True
+
         param6 = arcpy.Parameter(displayName="Comparison Name",
                                  name="Comparison_Name",
                                  datatype="GPString",
@@ -147,8 +159,8 @@ class CompareSimulationResults(object):
             method = parameters[2].valueAsText
             base_simulation = parameters[3].valueAsText
             target_simulation = parameters[4].valueAsText
-            if parameters[5].altered and parameters[5].value:
-                parameters[6].value = f"{target_simulation}_{base_simulation}_{method[:3]}"     
+            if parameters[5].value:
+                parameters[6].value = default_comparison_name(method, base_simulation, target_simulation)
 
         return
 
@@ -164,8 +176,36 @@ class CompareSimulationResults(object):
         if parameters[3].value and len(parameters[4].filter.list) == 0:
             parameters[1].setErrorMessage("Only one simulation is available. Cannot compare. Please run another simulation first.")
 
+        # The comparison name is the name of the output table in the delineation
+        # workspace. Running the tool deletes an existing table of that name, so a
+        # name already taken by something other than a recorded comparison
+        # (k2_results, for instance) is refused.
+        if parameters[6].value:
+            compare_name = parameters[6].valueAsText.strip()
+            workspace = parameters[7].valueAsText
+            if re.match(r"^[A-Za-z][A-Za-z0-9_]*$", compare_name) is None:
+                parameters[6].setErrorMessage(
+                    "The comparison name must start with a letter and contain only "
+                    "letters, numbers, and underscores.")
+            elif parameters[0].value and workspace and \
+                    arcpy.Exists(os.path.join(workspace, compare_name)):
+                delineation = parameters[0].valueAsText
+                prjgdb = agwa.get_project_geodatabase(delineation)
+                if compare_name in agwa.list_recorded_comparisons(prjgdb, delineation):
+                    parameters[6].setWarningMessage(
+                        f"A comparison named '{compare_name}' already exists and will be "
+                        f"overwritten.")
+                else:
+                    parameters[6].setErrorMessage(
+                        f"'{compare_name}' is already used by another table or feature "
+                        f"class in this workspace. Choose a different name.")
+        elif parameters[2].value and parameters[3].value and parameters[4].value \
+                and not parameters[5].value:
+            parameters[6].setErrorMessage(
+                "Enter a comparison name, or check 'Use Default Comparison Name'.")
+
         return
-    
+
 
     def execute(self, parameters, messages):
         """The source code of the tool."""
@@ -177,13 +217,31 @@ class CompareSimulationResults(object):
         target_simulation = parameters[4].value
         compare_name = parameters[6].valueAsText
         workspace = parameters[7].valueAsText
-       
+        if compare_name:
+            compare_name = compare_name.strip()
+        else:
+            compare_name = default_comparison_name(compare_method, base_simulation, target_simulation)
+
         compare_method = compare_method[:3]
         arcpy.AddMessage("Comparing simulation results")
         agwa.process_compare(workspace, delineation, discretization, compare_method, base_simulation, target_simulation, compare_name)
 
         arcpy.AddMessage("Joining the comparison table to feature class for display")
-        agwa.process_join(discretization, compare_name, workspace)
+        outputs = agwa.process_join(discretization, compare_name, workspace)
+
+        # Catalogue the comparison only once its outputs exist.
+        if outputs:
+            prjgdb = agwa.get_project_geodatabase(delineation)
+            if prjgdb:
+                hillslope_fc, channel_fc = outputs
+                agwa.record_comparison(prjgdb, delineation, discretization, compare_method,
+                                       str(base_simulation), str(target_simulation),
+                                       compare_name, hillslope_fc, channel_fc)
+            else:
+                arcpy.AddWarning(
+                    f"The comparison was created, but it could not be recorded in "
+                    f"metaDiff: no project geodatabase was found for '{delineation}' "
+                    f"in the metaDelineation table.")
 
         return
 
