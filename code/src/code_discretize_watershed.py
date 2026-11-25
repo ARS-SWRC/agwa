@@ -293,12 +293,20 @@ def discretize(prjgdb, workspace, delineation_name, discretization_name, save_in
     check_discretization(workspace, plane_feature_class, channel_feature_class, delineation_name, discretization_name)
 
     # Add the discretization to current map
-    project = arcpy.mp.ArcGISProject("CURRENT")
-    map = project.listMaps()[0]
-    map.addDataFromPath(plane_feature_class)
-    map.addDataFromPath(f"{workspace}/{channel_feature_class}")
-    project.save()
+    # project = arcpy.mp.ArcGISProject("CURRENT")
+    # map = project.listMaps()[0]
+    # map.addDataFromPath(plane_feature_class)
+    # map.addDataFromPath(f"{workspace}/{channel_feature_class}")
+    # project.save()
 
+    aprx = arcpy.mp.ArcGISProject("CURRENT")
+    m = aprx.activeMap
+    hillslope_layer = m.addDataFromPath(plane_feature_class)
+    channel_layer = m.addDataFromPath(os.path.join(workspace, channel_feature_class))
+    top_ref = m.listLayers()[0]
+    m.moveLayer(top_ref, hillslope_layer, "BEFORE")
+    m.moveLayer(hillslope_layer, channel_layer, "BEFORE")
+    aprx.save()
 
 def check_discretization(workspace, plane_feature_class, channel_feature_class, delination_name, discretization_name):
     """Check if the discretization is correct, and raise warnings if not."""
