@@ -1,41 +1,48 @@
 import os
 import arcpy
 import pandas as pd
-import arcpy.management  # Import statement added to provide intellisense in PyCharm
 from arcpy._mp import Table
 from datetime import datetime
 import config
 
-# Check out any necessary licenses
 arcpy.CheckOutExtension("spatial")
-
 
 def tweet(msg):
     """Produce a message for both arcpy and python"""
     m = "\n{}\n".format(msg)
     arcpy.AddMessage(m)
-    print(m)
 
 
-def initialize_workspace(prjgdb, delineation_name, outlet_feature_set, outlet_snapping_radius):
-    """Initialize the workspace by creating the metaDelineation table and writing the user's inputs to it."""
+def initialize_workspace(
+    prjgdb, delineation_name, outlet_feature_set, outlet_snapping_radius):
+    """Initialize the workspace by creating the metaDelineation table 
+    and writing the user's inputs to it.
+    """
 
     tweet("Creating metaDelineation table if it does not exist")
-    fields = ["DelineationName", "ProjectGeoDataBase", "DelineationWorkspace", "OutletX", "OutletY", "OutletSnappingRadius",
-              "CreationDate", "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation", "Status"]    
+    fields = [
+        "DelineationName", "ProjectGeoDataBase", "DelineationWorkspace", "OutletX",
+        "OutletY", "OutletSnappingRadius", "CreationDate", "AGWAVersionAtCreation",
+        "AGWAGDBVersionAtCreation", "Status"]
     metadata_delineation_table = os.path.join(prjgdb, "metaDelineation")
     if not arcpy.Exists(metadata_delineation_table):
         arcpy.CreateTable_management(prjgdb, "metaDelineation")
         for field in fields:
             arcpy.AddField_management(metadata_delineation_table, field, "TEXT")
     
-    tweet("Documenting user's inputs to metaDealineation table and matching spatial references of the outlet and DEM if necessary")
+    tweet("Documenting user's inputs to metaDealineation table and matching spatial "
+          "references of the outlet and DEM if necessary")
+    
     # Read spatial reference of the filled DEM from the metaWorkspace table
     meta_workspace_table = os.path.join(prjgdb, "metaWorkspace")
-    df = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_workspace_table, ["ProjectGeoDataBase", "FilledDEMPath"]))
+    df = pd.DataFrame(
+        arcpy.da.TableToNumPyArray(
+            meta_workspace_table, ["ProjectGeoDataBase", "FilledDEMPath"]))
+
     df = df[df['ProjectGeoDataBase']==prjgdb]
     if df.empty:
-        msg = (f"Cannot proceed. \nThe table 'metaDiscretization' returned 0 records with field "
+        msg = (f"Cannot proceed. \n"
+               f"The table 'metaWorkspace' returned 0 records with field "
                f"'ProjectGeoDataBase' equal to '{prjgdb}'.")
         tweet(msg)
         raise Exception(msg)
@@ -47,9 +54,12 @@ def initialize_workspace(prjgdb, delineation_name, outlet_feature_set, outlet_sn
     spatial_refrence_outlet = arcpy.Describe(outlet_feature_set).SpatialReference
     for row in arcpy.da.SearchCursor(outlet_feature_set, ["SHAPE@"]):
         if spatial_refrence_dem.name != spatial_refrence_outlet.name:
-            tweet("Projecting the outlet coordinates because the spatial references between the DEM and the outlet do "
-                  f"not match.\nDEM Spatial Reference: '{spatial_refrence_dem.name}'\n"
-                  f"Outlet Spatial Reference: '{spatial_refrence_outlet.name}'")                                                                                                      
+            msg = (
+                "Projecting the outlet coordinates because the spatial references "
+                "between the DEM and the outlet do not match.\n"
+                f"DEM Spatial Reference: '{spatial_refrence_dem.name}'\n"
+                f"Outlet Spatial Reference: '{spatial_refrence_outlet.name}'")
+            tweet(msg)                                                                                                   
             outlet_x = row[0].projectAs(spatial_refrence_dem).centroid.X
             outlet_y = row[0].projectAs(spatial_refrence_dem).centroid.Y
         else:
@@ -61,8 +71,10 @@ def initialize_workspace(prjgdb, delineation_name, outlet_feature_set, outlet_sn
     # write the user's inputs to the metaDelineation table
     delineation_folder = os.path.join(os.path.split(prjgdb)[0], delineation_name)
     delineation_workspace = os.path.join(delineation_folder, f"{delineation_name}.gdb") 
-    row_list = [delineation_name, prjgdb, delineation_workspace, outlet_x, outlet_y, outlet_snapping_radius, datetime.now().isoformat(),
-                config.AGWA_VERSION, config.AGWAGDB_VERSION, "Success"]        
+    row_list = [
+        delineation_name, prjgdb, delineation_workspace, outlet_x, outlet_y, 
+        outlet_snapping_radius, datetime.now().isoformat(),
+        config.AGWA_VERSION, config.AGWAGDB_VERSION, "Success"]        
     with arcpy.da.InsertCursor(metadata_delineation_table, fields) as insert_cursor:
             insert_cursor.insertRow(row_list)
 
