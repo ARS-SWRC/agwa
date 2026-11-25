@@ -13,174 +13,232 @@ def tweet(msg):
     """Produce a message for both arcpy and python"""
     m = "\n{}\n".format(msg)
     arcpy.AddMessage(m)
-    print(m, arcpy.GetMessages())
 
 
-def initialize_workspace(delineation_name, discretization_name, parameterization_name, prjgdb, land_cover_path,
-                         land_cover_lut_path, soil_layer_path, soils_database_path, max_horizons,
-                         max_thickness, channel_type):
-    """Initialize the workspace and write user's input to the metaParameterization table."""
-
+def initialize_workspace(
+    delineation_name, discretization_name, parameterization_name, 
+    prjgdb, land_cover_path, land_cover_lut_path, soil_layer_path, 
+    soils_database_path, max_horizons, max_thickness, channel_type
+):
 
     tweet("Checking if metaParameterization table exists")
     meta_parameterization_table = os.path.join(prjgdb, "metaParameterization")
     if not arcpy.Exists(meta_parameterization_table):
-        raise Exception(f"The table 'metaParameterization' does not exist in the project GeoDataBase {prjgdb}."
-                        f"Please run the Step 4 Parameterize Elements first.")
-    
+        raise Exception(
+            f"The table 'metaParameterization' does not exist in the project "
+            f"GeoDataBase {prjgdb}. Please run the Step 4 Parameterize Elements first."
+        )
 
     tweet("Documenting user's input to metaParameterization table")
-    fields = ["DelineationName", "DiscretizationName", "ParameterizationName", 
-              "SlopeType", "FlowLengthMethod", "HydraulicGeometryRelationship", 
-              "ChannelType", "LandCoverPath", "LandCoverLookUpTablePath",
-              "SoilsPath", "SoilsDatabasePath", "MaxHorizons", "MaxThickness",
-              "CreationDate", "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation", "Status"]
+    fields = [
+        "DelineationName", "DiscretizationName", "ParameterizationName", 
+        "SlopeType", "FlowLengthMethod", "HydraulicGeometryRelationship", 
+        "ChannelType", "LandCoverPath", "LandCoverLookUpTablePath",
+        "SoilsPath", "SoilsDatabasePath", "MaxHorizons", "MaxThickness",
+        "CreationDate", "AGWAVersionAtCreation", "AGWAGDBVersionAtCreation", "Status"
+    ]
 
-    row_list = [delineation_name, discretization_name, parameterization_name, 
-                "", "", "", channel_type, land_cover_path, land_cover_lut_path, 
-                soil_layer_path, soils_database_path, max_horizons, max_thickness,
-                datetime.now().isoformat(), config.AGWA_VERSION, config.AGWAGDB_VERSION, "X"]
-    
+    row_list = [
+        delineation_name, discretization_name, parameterization_name, 
+        "", "", "", channel_type, land_cover_path, land_cover_lut_path, 
+        soil_layer_path, soils_database_path, max_horizons, max_thickness,
+        datetime.now().isoformat(), config.AGWA_VERSION, config.AGWAGDB_VERSION, "X"
+    ]
+
     with arcpy.da.UpdateCursor(meta_parameterization_table, fields) as cursor:
         for row in cursor:
-            if (row[0] == delineation_name and row[1] == discretization_name and
-                row[2] == parameterization_name):
+            if (
+                row[0] == delineation_name and 
+                row[1] == discretization_name and 
+                row[2] == parameterization_name
+            ):
                 row[6:] = row_list[6:]
                 cursor.updateRow(row)
 
-
-def parameterize(prjgdb, workspace, delineation_name, discretization_name, parameterization_name, 
-                 save_intermediate_outputs):
-
-    """Parameterize land cover and soils for each hillslope and channel in the watershed. main function.
-    functions called: extract_parameters, intersect_soils, weight_hillsope_parameters_by_area_fractions, 
-    intersect_weight_land_cover_by_area, parameterize_channels"""
+def parameterize(
+    prjgdb, workspace, delineation_name, discretization_name, 
+    parameterization_name, save_intermediate_outputs
+):
+    """This is the main function that parameterizes land cover and soils for 
+    each hillslope and channel element in the watershed.
+    """
 
     # Step 1. Extract parameters from the metadata tables 
-    (max_thickness, max_horizons, land_cover, land_cover_lut, soil_layer_path, soils_database_path, 
-     AGWA_directory, channel_type) = extract_parameters(prjgdb, delineation_name, discretization_name, 
-                                                        parameterization_name)  
+    (max_thickness, max_horizons, land_cover, land_cover_lut, soil_layer_path, 
+     soils_database_path, AGWA_directory, channel_type
+    ) = extract_parameters(
+        prjgdb, delineation_name, discretization_name, parameterization_name)  
     
-    
-    # Step 2. Get weighted soils and land cover. Merge with other hillslope parameters (17 or 33 parameters)
-    parameterize_hillslopes(workspace, delineation_name, discretization_name, parameterization_name, 
-                            soil_layer_path, soils_database_path, AGWA_directory, max_thickness, 
-                            max_horizons, land_cover, land_cover_lut, save_intermediate_outputs)
+    # Step 2. Get weighted soils and land cover. Merge with other hillslope parameters     
+    parameterize_hillslopes(
+        workspace, delineation_name, discretization_name, parameterization_name, 
+        soil_layer_path, soils_database_path, AGWA_directory, max_thickness, 
+        max_horizons, land_cover, land_cover_lut, save_intermediate_outputs)
     
     # Step 3. Get channel elements
-    parameterize_channels(workspace, delineation_name, discretization_name, parameterization_name,
-                                                  channel_type, AGWA_directory)
+    parameterize_channels(
+        workspace, delineation_name, discretization_name, parameterization_name,
+        channel_type, AGWA_directory)
 
 
-def parameterize_hillslopes(workspace, delineation_name, discretization_name, parameterization_name, 
-                            soil_layer_path, soils_database_path, agwa_directory, max_thickness,
-                            max_horizons, land_cover, land_cover_lut, save_intermediate_outputs):
+def parameterize_hillslopes(
+    workspace, delineation_name, discretization_name, parameterization_name, 
+    soil_layer_path, soils_database_path, agwa_directory, max_thickness, max_horizons,
+    land_cover, land_cover_lut, save_intermediate_outputs):
     
-    """Parameterize hillslopes. Results: 33 parameters. Called in parameterize function."""
+    """Parameterize hillslope elements. Results: 33 parameters."""
 
     # Step 1. intersect soils and land cover with hillslopes
     tweet("Intersecting soils with hillslopes.")
-    intersect_feature_class = intersect_soils(workspace, delineation_name, discretization_name, parameterization_name,
-        soil_layer_path, soils_database_path, agwa_directory, max_thickness, max_horizons, save_intermediate_outputs)
+    intersect_feature_class = intersect_soils(workspace, delineation_name, discretization_name, 
+        parameterization_name, soil_layer_path, soils_database_path, agwa_directory,
+        max_thickness, max_horizons, save_intermediate_outputs)
     
     tweet("Calculating weighted soil parameters for each hillslope.")
-    df_soil = weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, discretization_name, 
-                parameterization_name, intersect_feature_class)
+    df_soil = weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, 
+        discretization_name, parameterization_name, intersect_feature_class)
     
     # Step 2. intersect land cover with hillslopes
     tweet("Intersecting land cover with hillslopes.")
-    df_cover = intersect_weight_land_cover_by_area(workspace, delineation_name, discretization_name, land_cover, 
-                                                   land_cover_lut, agwa_directory)
-    df_soil_cover = pd.merge(df_soil, df_cover, left_on="HillslopeID", right_on="HillslopeID", how="left")
+    df_cover = intersect_weight_land_cover_by_area(workspace, delineation_name, 
+        discretization_name, land_cover, land_cover_lut, agwa_directory)
+    df_soil_cover = pd.merge(df_soil, df_cover, 
+        left_on="HillslopeID", right_on="HillslopeID", how="left")
     
     # Step 3. save the results to the workspace geodatabase
     tweet("Saving hillslope results to the workspace geodatabase.")
     arcgis_table = os.path.join(workspace, "parameters_hillslopes")
     if not arcpy.Exists(arcgis_table):
-        raise Exception(f"The table 'parameters_hillslopes' does not exist in the workspace {workspace}.")
-    else:        
-        for column in df_soil_cover.columns:
-            if column not in [f.name for f in arcpy.ListFields(arcgis_table)]:
-                arcpy.AddField_management(arcgis_table, column, "DOUBLE")
+        raise Exception(
+            f"The table 'parameters_hillslopes' does not exist in the workspace {workspace}.")
+    existing_fields = [f.name for f in arcpy.ListFields(arcgis_table)]
+    for column in df_soil_cover.columns:
+        if column not in existing_fields:
+            arcpy.AddField_management(arcgis_table, column, "DOUBLE")
 
-    fields = [field.name for field in arcpy.ListFields(arcgis_table)]
-    with arcpy.da.UpdateCursor(arcgis_table, fields) as cursor:
+    # fields = [field.name for field in arcpy.ListFields(arcgis_table)]
+    # with arcpy.da.UpdateCursor(arcgis_table, fields) as cursor:
+    #     for row in cursor:
+    #         if (row[cursor.fields.index("DelineationName")] == delineation_name and 
+    #             row[cursor.fields.index("DiscretizationName")] == discretization_name and 
+    #             row[cursor.fields.index("ParameterizationName")] == parameterization_name):
+
+    #             hillslope_id = row[cursor.fields.index("HillslopeID")]
+
+    #             # Iterate through DataFrame columns to update corresponding fields in the row
+    #             for column in df_soil_cover.columns:
+    #                 if column not in ["HillslopeID"]:
+    #                     df_value = df_soil_cover.loc[df_soil_cover["HillslopeID"] == hillslope_id, column].values
+    #                     if df_value.size > 0:
+    #                         row[cursor.fields.index(column)] = df_value[0]
+    #         cursor.updateRow(row)
+
+
+    # Lookup of HillslopeID -> {column: value}, with NaN converted to None (null in GDB)
+    parameter_columns = [c for c in df_soil_cover.columns if c != "HillslopeID"]
+    df_values = df_soil_cover.set_index("HillslopeID")[parameter_columns].astype(object)
+    df_values = df_values.where(df_values.notna(), None)
+    values_by_hillslope = df_values.to_dict(orient="index")
+
+    where_clause = (
+        f"DelineationName = '{delineation_name}' AND "
+        f"DiscretizationName = '{discretization_name}' AND "
+        f"ParameterizationName = '{parameterization_name}'"
+    )
+
+    fields = [f.name for f in arcpy.ListFields(arcgis_table)]
+    with arcpy.da.UpdateCursor(arcgis_table, fields, where_clause) as cursor:
+        hillslope_idx = cursor.fields.index("HillslopeID")
+        column_idx = {c: cursor.fields.index(c) for c in parameter_columns}
         for row in cursor:
-            if (row[cursor.fields.index("DelineationName")] == delineation_name and 
-                row[cursor.fields.index("DiscretizationName")] == discretization_name and 
-                row[cursor.fields.index("ParameterizationName")] == parameterization_name):
-
-                hillslope_id = row[cursor.fields.index("HillslopeID")]
-
-                # Iterate through DataFrame columns to update corresponding fields in the row
-                for column in df_soil_cover.columns:
-                    if column not in ["HillslopeID"]:
-                        df_value = df_soil_cover.loc[df_soil_cover["HillslopeID"] == hillslope_id, column].values
-                        if df_value.size > 0:
-                            row[cursor.fields.index(column)] = df_value[0]
+            values = values_by_hillslope.get(row[hillslope_idx])
+            if values is None:
+                continue
+            for column, idx in column_idx.items():
+                row[idx] = values[column]
             cursor.updateRow(row)
 
 
-def parameterize_channels(workspace, delineation_name, discretization_name, parameterization_name, 
-                          channel_type, agwa_directory):
-    """Parameterize channel elements. Note: it is important to make sure parameters match in this function.
-    Called in parameterize function."""    
+def get_channel_parameters_based_on_adj_hillslopes(
+    workspace, discretization_name, df_hillslope_parameters):
+    """Get channel parameters based on adjacent hillslopes. Returns 17 parameters"""
 
-    def get_channel_parameters_based_on_adj_hillslopes(workspace, discretization_name, df_hillslope_parameters):
-        """Get channel parameters based on adjacent hillslopes. Called in parameterize_channels function.
-        returned 17 parameters"""
+    parameters = [
+            "Ksat", "Manning", "Pave", "Imperviousness", "SMax", "CV", "G", 
+            "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", 
+            "Distribution"
+        ]                                        
 
-        parameters = ["Ksat", "Manning", "Pave", "Imperviousness", "SMax", "CV", "G", "Porosity", "Rock",
-                    "Sand", "Silt", "Clay", "Splash", "Cohesion", "Distribution"]                                          
+    df_channels = pd.DataFrame(arcpy.da.TableToNumPyArray(
+        os.path.join(workspace, f"{discretization_name}_channels"), ["ChannelID"]))
 
-        df_channels = pd.DataFrame(arcpy.da.TableToNumPyArray(
-            os.path.join(workspace, f"{discretization_name}_channels"), ["ChannelID"]))
+    for channel_id in df_channels.ChannelID:
+        hillslope_ids = [channel_id-1, channel_id-2, channel_id-3]
+        hillslope_ids = [
+            hid for hid in hillslope_ids 
+            if hid in df_hillslope_parameters.HillslopeID.values
+        ]
 
-        for channel_id in df_channels.ChannelID:
-            hillslope_ids = [channel_id-1, channel_id-2, channel_id-3]
-            hillslope_ids = [hid for hid in hillslope_ids if hid in df_hillslope_parameters.HillslopeID.values]
-            df_hillslopes_filtered = df_hillslope_parameters[df_hillslope_parameters.HillslopeID.isin(hillslope_ids)]
-            total_area = df_hillslopes_filtered.Area.sum()
-            for parameter in parameters:
-                weighted_value = (df_hillslopes_filtered[parameter] * df_hillslopes_filtered.Area).sum() / total_area
-                df_channels.loc[df_channels.ChannelID == channel_id, parameter] = weighted_value
-
-        # Weight the texture factions, so that they sum to 1. When the sum of Sand, Silt, and Clay is 0, set them to 0.
-        df_channels[["Sand", "Clay", "Silt"]] = df_channels[["Sand", "Clay", "Silt"]].div(
-            df_channels[["Sand", "Clay", "Silt"]].sum(axis=1), axis=0).fillna(0)
+        df_hillslopes_filtered = df_hillslope_parameters[
+            df_hillslope_parameters.HillslopeID.isin(hillslope_ids)
+        ]
+        total_area = df_hillslopes_filtered.Area.sum()
         
-        return df_channels
+        for parameter in parameters:
+            weighted_value = (
+                (df_hillslopes_filtered[parameter] * df_hillslopes_filtered.Area).sum() 
+                / total_area)
+            df_channels.loc[df_channels.ChannelID == channel_id, parameter] = weighted_value
+
+    # Weight the texture factions, so that they sum to 1.
+    # When the sum of Sand, Silt, and Clay is 0, set them to 0.
+    texture_cols = ["Sand", "Clay", "Silt"]
+    df_channels[texture_cols] = df_channels[texture_cols].div(
+            df_channels[texture_cols].sum(axis=1), axis=0
+        ).fillna(0)
+    
+    return df_channels
+
+
+def parameterize_channels(
+    workspace, delineation_name, discretization_name, parameterization_name, 
+    channel_type, agwa_directory):
 
     tweet("Calculating channel parameters.")
-    # Get channel parameters based on weighted parameters from adjacent hillslopes (17 parameters in total)
-    df_hillslope_parameters = pd.DataFrame(arcpy.da.TableToNumPyArray(
-                                            os.path.join(workspace, "parameters_hillslopes"), "*"))
+    hillslope_table = os.path.join(workspace, "parameters_hillslopes")
+    df_hillslope_parameters = pd.DataFrame(
+        arcpy.da.TableToNumPyArray(hillslope_table, "*"))
     df_hillslope_parameters = df_hillslope_parameters[
-                                    (df_hillslope_parameters['DelineationName'] == delineation_name) & 
-                                    (df_hillslope_parameters['DiscretizationName'] == discretization_name) & 
-                                    (df_hillslope_parameters['ParameterizationName'] == parameterization_name)]
+        (df_hillslope_parameters['DelineationName'] == delineation_name) & 
+        (df_hillslope_parameters['DiscretizationName'] == discretization_name) & 
+        (df_hillslope_parameters['ParameterizationName'] == parameterization_name)
+    ]
                                                 
-    df_channel_parameters = get_channel_parameters_based_on_adj_hillslopes(workspace, discretization_name, 
-                                                                           df_hillslope_parameters)
+    df_channel_parameters = get_channel_parameters_based_on_adj_hillslopes(
+        workspace, discretization_name, df_hillslope_parameters)
 
-    # Add one parameter (Woolhiser) (18 parameters in total),  assuming woolhiser channel type is always "Yes" for now.
+    # Add Woolhiser parameter (assuming channel type is always "Yes" for now)
     df_channel_parameters = df_channel_parameters.assign(Woolhiser="Yes")
 
-    # Modify 3 parameters (ksat, manning, and pave) based on the user selected input channel type. 
+    # Modify ksat, manning, and pave based on the user selected input channel type 
     df_channel_type = pd.DataFrame(arcpy.da.TableToNumPyArray(
-        os.path.join(agwa_directory, "lookup_tables.gdb", "channel_types"), "*", null_value=-9999))
-    channel_type_row = df_channel_type[df_channel_type.Channel_Type == channel_type][["Ksat", "Manning", "Pave"]]
+        os.path.join(agwa_directory, "lookup_tables.gdb", "channel_types"), 
+        "*", null_value=-9999))
+    channel_type_row = df_channel_type[
+        df_channel_type.Channel_Type == channel_type][["Ksat", "Manning", "Pave"]]
     if not channel_type_row.empty:
         ksat, manning, pave = channel_type_row.values[0]
         if ksat != -9999 and manning != -9999 and pave != -9999:
-            df_channel_parameters = df_channel_parameters.assign(Ksat=ksat, Manning=manning, Pave=pave)
+            df_channel_parameters = df_channel_parameters.assign(
+                Ksat=ksat, Manning=manning, Pave=pave)
     else:
         tweet(f"Channel type {channel_type} not found in the Lookup table.")
 
     tweet("Saving channel results to the workspace geodatabase.")
     arcgis_table = os.path.join(workspace, "parameters_channels")
     if not arcpy.Exists(arcgis_table):
-        raise Exception(f"The table 'parameters_channels' does not exist in the workspace {workspace}.")
+        raise Exception(
+            f"The table 'parameters_channels' does not exist in the workspace {workspace}.")
     else:
         for column in df_channel_parameters.columns:
             if column not in [f.name for f in arcpy.ListFields(arcgis_table)]:
@@ -206,11 +264,12 @@ def parameterize_channels(workspace, delineation_name, discretization_name, para
                 cursor.updateRow(row)
 
 
-def intersect_weight_land_cover_by_area(workspace, delineation_name, discretization_name, land_cover, land_cover_lut, 
-                                        agwa_directory):
+def intersect_weight_land_cover_by_area(
+    workspace, delineation_name, discretization_name, land_cover, 
+    land_cover_lut, agwa_directory):
 
-    """Intersect land cover with hillslopes and calculate weighted parameters for each hillslope.
-    called in parameterize function."""
+    """Intersect land cover with hillslopes and calculate weighted parameters 
+    for each hillslope."""
 
     # test if land cover needs a buffer
     watershed_feature_class = os.path.join(workspace, f"{delineation_name}")
@@ -218,13 +277,15 @@ def intersect_weight_land_cover_by_area(workspace, delineation_name, discretizat
     if buffer_size:
         watershed_buffer = os.path.join(workspace, f"{delineation_name}_buffer")
         if not arcpy.Exists(watershed_buffer):
-            arcpy.analysis.Buffer(watershed_feature_class, watershed_buffer, f"{buffer_size} Meters", 
-                                "FULL", "ROUND", "NONE", None, "PLANAR")        
+            arcpy.analysis.Buffer(
+                watershed_feature_class, watershed_buffer, f"{buffer_size} Meters", 
+                "FULL", "ROUND", "NONE", None, "PLANAR")        
         clipped_lc_raster = os.path.join(workspace, f"landcover_clipped")
         if arcpy.Exists(clipped_lc_raster):
             arcpy.Delete_management(clipped_lc_raster)
             tweet(f"Clipping land cover raster.")
-        arcpy.Clip_management(land_cover, "", clipped_lc_raster, watershed_buffer, "", "ClippingGeometry")            
+        arcpy.Clip_management(
+            land_cover, "", clipped_lc_raster, watershed_buffer, "", "ClippingGeometry")            
     else:
         clipped_lc_raster = land_cover
 
@@ -240,35 +301,36 @@ def intersect_weight_land_cover_by_area(workspace, delineation_name, discretizat
     # convert land cover raster to polygon, then intersect with hillslopes
     hillslope_feature_class = os.path.join(workspace, f"{discretization_name}_hillslopes")
     land_cover_feature_class = os.path.join(workspace, f"{discretization_name}_land_cover")
-    intersect_feature_class = os.path.join(workspace, f"{discretization_name}_land_cover_PairwiseIntersect")
-
-    if arcpy.Exists(land_cover_feature_class):
-        arcpy.Delete_management(land_cover_feature_class) ## delete this when testing is done
-    if arcpy.Exists(intersect_feature_class):
-        arcpy.Delete_management(intersect_feature_class) ## delete this when testing is done
+    intersect_feature_class = os.path.join(
+        workspace, f"{discretization_name}_land_cover_PairwiseIntersect")
 
     prj_lc_raster = arcpy.sa.Int(prj_lc_raster)
-    arcpy.RasterToPolygon_conversion(prj_lc_raster, land_cover_feature_class, "NO_SIMPLIFY", "VALUE")
-    arcpy.analysis.PairwiseIntersect(f"'{land_cover_feature_class}'; '{hillslope_feature_class}'", 
-                                     intersect_feature_class, "ALL", None, "INPUT")
+    arcpy.RasterToPolygon_conversion(
+        prj_lc_raster, land_cover_feature_class, "NO_SIMPLIFY", "VALUE")
+    arcpy.analysis.PairwiseIntersect(
+        f"'{land_cover_feature_class}'; '{hillslope_feature_class}'", 
+            intersect_feature_class, "ALL", None, "INPUT")
     
     df_cover_lut = pd.DataFrame(arcpy.da.TableToNumPyArray(
         os.path.join(agwa_directory, "lookup_tables.gdb", land_cover_lut), "*"))
 
     cover_lut_fields = ["CLASS", "NAME", "COVER", "INT", "N", "IMPERV"]
     df_cover_lut = df_cover_lut[cover_lut_fields]
-    df_cover_lut = df_cover_lut.rename(columns={"NAME": "LandCoverClass", "COVER": "Canopy",
-                                                "INT": "Interception", "N": "Manning", "IMPERV": "Imperviousness"}) 
+    df_cover_lut = df_cover_lut.rename(
+        columns={"NAME": "LandCoverClass", "COVER": "Canopy",
+                 "INT": "Interception", "N": "Manning", "IMPERV": "Imperviousness"}) 
     df_hillslope_cover = pd.DataFrame(arcpy.da.TableToNumPyArray(
             intersect_feature_class, ["HillslopeID", "gridcode", "Shape_Area"]))
-    df_merge = pd.merge(df_hillslope_cover, df_cover_lut, left_on="gridcode", right_on="CLASS", how="left")  
+    df_merge = pd.merge(
+        df_hillslope_cover, df_cover_lut, left_on="gridcode", right_on="CLASS", how="left")  
 
     tweet("Calculating weighted land cover parameters for each hillslope.")
     parameters = ["Canopy", "Interception", "Manning", "Imperviousness"]
     def weight_parameters(group, weight_column):
         weighted_par = pd.Series()
         for param in parameters:
-            weighted_par[param] =  (group[param] * group[weight_column]).sum() / group[weight_column].sum()
+            weighted_par[param] = ((group[param] * group[weight_column]).sum()
+             / group[weight_column].sum())
         return pd.DataFrame([weighted_par])
         
     df_weighted = pd.DataFrame()
@@ -281,42 +343,49 @@ def intersect_weight_land_cover_by_area(workspace, delineation_name, discretizat
     return df_weighted
 
 
-def intersect_soils(workspace, delineation_name, discretization_name, parameterization_name, soil_layer_path, 
-                    soil_gdb, agwa_directory, max_thickness, max_horizons, save_intermediate_outputs):
+def intersect_soils(
+    workspace, delineation_name, discretization_name, parameterization_name, soil_layer_path, 
+    soil_gdb, agwa_directory, max_thickness, max_horizons, save_intermediate_outputs):
 
-    """Intersect soils with gSSURGO tables and query parameters for each soil component, horizon, and texture.
-    Outputs include tables that are saved to the workspace geodatabase. Called in parameterize function."""
+    """Intersect soils with gSSURGO tables and query parameters for 
+    each soil component, horizon, and texture.
+    Outputs include tables that are saved to the workspace geodatabase."""
             
     # Step 1: Intersect soils with hillslopes
-    intersect_feature_class = intersect_soil_with_hillslopes(soil_layer_path, delineation_name, discretization_name, workspace)
+    intersect_feature_class = intersect_soil_with_hillslopes(
+        soil_layer_path, delineation_name, discretization_name, workspace)
     
-    # Step 2: Load tables       
-    df_mapunit, df_component, df_horizon, df_texture_group, df_texture, df_kin_lut = load_tables(
-        soil_gdb, agwa_directory, intersect_feature_class)    
+    # Step 2: Load and parepare soil tables,
+    # keeping only records linked to the mukey(s) in the watershed
+    (df_mapunit, df_component, df_horizon, df_texture_group, df_texture, df_kin_lut
+    ) = load_and_prepare_watershed_soil_tables(soil_gdb, agwa_directory, intersect_feature_class)
 
     # Step 3: Query soil parameters
     df_horizon_parameters = query_soil_parameters(df_mapunit, df_component, df_horizon,
          df_texture_group, df_texture, df_kin_lut, max_thickness, max_horizons)
 
     # Step 4: Calculate weighted soil parameters
-    df_weighted_by_horizon, df_weighted_by_component = calculate_weighted_hillslope_soil_parameters(df_horizon_parameters)
+    (df_weighted_by_horizon, df_weighted_by_component
+    ) = calculate_weighted_hillslope_soil_parameters(df_horizon_parameters)
 
     # Step 5: Save results
-    save_results(workspace, delineation_name, discretization_name, parameterization_name, save_intermediate_outputs,
-                 df_horizon_parameters, df_weighted_by_horizon, df_weighted_by_component)
+    save_results(workspace, delineation_name, discretization_name, parameterization_name,
+        save_intermediate_outputs, df_horizon_parameters, df_weighted_by_horizon, 
+        df_weighted_by_component)
     
     return intersect_feature_class
 
 
-def intersect_soil_with_hillslopes(soil_layer_path, delineation_name, discretization_name,workspace):
+def intersect_soil_with_hillslopes(
+    soil_layer_path, delineation_name, discretization_name,workspace):
     """Intersect soil with hillslopes."""
 
     # convert soil raster to polygon
     watershed_feature_class = os.path.join(workspace, f"{delineation_name}")
     desc = arcpy.Describe(soil_layer_path)
     if desc.dataType == "RasterDataset":
-        soil_feature_class = convert_soil_raster_to_polygon(soil_layer_path, watershed_feature_class, 
-                                                            delineation_name, workspace)
+        soil_feature_class = convert_soil_raster_to_polygon(
+            soil_layer_path, watershed_feature_class, delineation_name, workspace)
         soil_feature_class_name = os.path.basename(soil_feature_class)    
     elif desc.dataType == "FeatureClass":
         soil_feature_class = soil_layer_path
@@ -326,92 +395,180 @@ def intersect_soil_with_hillslopes(soil_layer_path, delineation_name, discretiza
         soil_feature_class_name = os.path.basename(soil_feature_class).replace(".shp", "")
 
     hillslope_feature_class = os.path.join(workspace, f"{discretization_name}_hillslopes")
-    intersect_feature_class = os.path.join(workspace, 
-                                f"{discretization_name}_{soil_feature_class_name}_PairwiseIntersect")
+    intersect_feature_class = os.path.join(
+        workspace, f"{discretization_name}_{soil_feature_class_name}_PairwiseIntersect")
     if arcpy.Exists(intersect_feature_class):
         arcpy.Delete_management(intersect_feature_class)  
     
     tweet(f"Intersecting {soil_feature_class_name} with {discretization_name}_hillslopes.")
-    arcpy.analysis.PairwiseIntersect(f"'{soil_feature_class}'; '{hillslope_feature_class}'", 
-                                    intersect_feature_class, "ALL", None, "INPUT")
+    arcpy.analysis.PairwiseIntersect(
+        f"'{soil_feature_class}'; '{hillslope_feature_class}'", 
+        intersect_feature_class, "ALL", None, "INPUT")
     
     return intersect_feature_class
 
-
+def load_and_prepare_watershed_soil_tables(
+    soil_gdb, agwa_directory, intersect_feature_class):
+    """
+    1. Load tables from gSSURGO database and AGWA lookup table.
+    2. Reduce the tables by only keeping those linked to the mukey in watershed.
+    3. Fill in missing comppct_r.
+    """
  
-def load_tables(soil_gdb, agwa_directory, intersect_feature_class):
-    """Load tables from gSSURGO database and AGWA lookup table."""
- 
-    # reading tables from AGWA directory and gSSURGO database
     component_table = os.path.join(soil_gdb, "component")
     horizon_table = os.path.join(soil_gdb, "chorizon")
     texture_table = os.path.join(soil_gdb, "chtexture")
     texture_group_table = os.path.join(soil_gdb, "chtexturegrp")
     kin_lut_table = os.path.join(agwa_directory, "lookup_tables.gdb", "kin_lut")
  
-    # define fields needed and read tables into dataframes
-    # Note: soil physical/hydraulic parameters (Ksat, G, Porosity, Sand, Silt, Clay)
-    # are sourced from the kin_lut table by texture, so the corresponding SSURGO
-    # fields (ksat_r, sandtotal_r, silttotal_r, claytotal_r, dbthirdbar_r,
-    # partdensity) are no longer read here.
     component_fields = ["cokey", "comppct_r", "mukey"]
     horizon_fields = ["cokey", "chkey", "hzname", "hzdept_r", "hzdepb_r",
                       "sieveno10_r", "kwfact"]
+   
     df_mapunit = pd.DataFrame(arcpy.da.TableToNumPyArray(intersect_feature_class, ["mukey"]))
-    df_component = pd.DataFrame(arcpy.da.TableToNumPyArray(component_table, component_fields, skip_nulls=False))
+    mukeys_in_watershed = df_mapunit["mukey"].astype(str).unique()
+
+    df_component = pd.DataFrame(arcpy.da.TableToNumPyArray(
+        component_table, component_fields, skip_nulls=False,
+        null_value={"comppct_r": -9999}))
+    df_component["comppct_r"] = df_component["comppct_r"].astype(float)
+    df_component.loc[df_component["comppct_r"] == -9999, "comppct_r"] = np.nan
+    df_component["mukey"] = df_component["mukey"].astype(str)
+    df_component = df_component[df_component["mukey"].isin(mukeys_in_watershed)]
+
+    df_component = fill_missing_component_percentages(df_component, mukeys_in_watershed)
+
     df_horizon = pd.DataFrame(arcpy.da.TableToNumPyArray(horizon_table, horizon_fields))
+    df_horizon = df_horizon[df_horizon["cokey"].isin(df_component["cokey"])]
+
     df_texture_group = pd.DataFrame(arcpy.da.TableToNumPyArray(texture_group_table, "*"))
+    df_texture_group = df_texture_group[df_texture_group["chkey"].isin(df_horizon["chkey"])]
+
     df_texture = pd.DataFrame(arcpy.da.TableToNumPyArray(texture_table, "*"))
-    df_kin_lut = pd.DataFrame(arcpy.da.TableToNumPyArray(kin_lut_table, "*"))
- 
+    df_texture = df_texture[df_texture["chtgkey"].isin(df_texture_group["chtgkey"])]
+
+    df_kin_lut = pd.DataFrame(arcpy.da.TableToNumPyArray(kin_lut_table, "*"))   
+
     return df_mapunit, df_component, df_horizon, df_texture_group, df_texture, df_kin_lut
 
+def resolve_texture(df_texture, chtgkey):
+    """Resolve the texture name for a texture group from the chtexture table.
+    Returns None if the texture group has no rows in chtexture."""
+    df_texture_filtered = df_texture[df_texture["chtgkey"] == chtgkey]
+    if df_texture_filtered.empty:
+        return None
+    texture = df_texture_filtered.texcl.values[0]
+    if texture == "None":
+        texture = df_texture_filtered.lieutex.values[0]
+    return texture
+
+def fill_missing_component_percentages(df_component, mukeys):
+    """Fill missing comppct_r values (null in gSSURGO) for the map units in the watershed.
+    - If ALL components of a map unit are null, they share 100% evenly.
+    - If only some are null, (100 - sum of known) is split evenly among the null ones.
+    - If (100 - sum of known) == 0, the null components get 0 and are excluded from weighting.
+    """
+    df_component = df_component.copy()
+    df_component["comppct_r"] = df_component["comppct_r"].astype(float)
+
+    filled_all, filled_some, filled_zero = [], [], []
+    for mukey in mukeys:
+        mukey_mask = df_component["mukey"] == mukey
+        idx = df_component.index[mukey_mask]
+
+        if len(idx) == 0:
+            continue
+
+        pct = df_component.loc[idx, "comppct_r"]
+        missing = pct.isna()
+
+        if not missing.any():
+            continue
+
+        if missing.all():
+            df_component.loc[idx, "comppct_r"] = 100.0 / len(idx)
+            filled_all.append(mukey)
+        else:
+            known_sum = pct[~missing].sum()
+            remainder = max(100.0 - known_sum, 0.0)
+            missing_count = missing.sum()
+
+            df_component.loc[idx[missing], "comppct_r"] = remainder / missing_count
+            if remainder == 0:
+                filled_zero.append(mukey)
+            else:
+                filled_some.append(mukey)
+
+    if filled_all:
+        msg = (
+            f"   Warning: {len(filled_all)} map unit(s) have no component "
+            f"percentage (comppct_r is null) for any component. Components "
+            f"were assumed to be evenly distributed.\n"
+            f"   Affected mukeys: {', '.join(map(str, filled_all))}"
+        )
+        tweet(msg)
+
+    if filled_some:
+        msg = (
+            f"   Warning: {len(filled_some)} map unit(s) have some components "
+            f"with null comppct_r. The unassigned percentage was split "
+            f"evenly among them.\n"
+            f"   Affected mukeys: {', '.join(map(str, filled_some))}"
+        )
+        tweet(msg)
+
+    if filled_zero:
+        msg = (
+            f"   Warning: {len(filled_zero)} map unit(s) have components with "
+            f"null comppct_r, but the other components already account for "
+            f"100% or more. The null components were assigned 0% and excluded "
+            f"from weighting.\n"
+            f"   Affected mukeys: {', '.join(map(str, filled_zero))}"
+        )
+        tweet(msg)
+
+    return df_component
 
 
-def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group, df_texture, df_kin_lut, max_thickness, max_horizons):
+def query_soil_parameters(
+    df_mapunit, df_component, df_horizon, df_texture_group, df_texture, df_kin_lut,
+    max_thickness, max_horizons):
     """Query soil parameters. Called in intersect_soils function.
  
         Note on Pave Textures:
             This is inherited from the original VB code.
             Pave = 1 when the texture is one of ["WB", "UWB", "ICE", "CEM", "IND", "GYP"].
-            "BR" and "CEM_BR", both of which represent bedrock in the gSSURGO_CA database, are added to the list.
+            "BR" and "CEM_BR", both of which represent bedrock in the gSSURGO_CA database, 
+            are added to the list.
             "VAR", which means "variable" in the gSSURGO_CA database, is also added,
             but it needs to be confirmed if Pave=1 is correct for this type.
-            The list could potentially be updated and expanded with applying gSSURGO database in other States.
+            The list could potentially be updated and expanded with applying gSSURGO 
+            database in other States.
  
             When Pave=1, Sand, Clay and Silt are set to 0.33, 0.33, and 0.34, respectively.
             The values do not matter, but they need to sum to 1, so K2 can be executed.
             Also, they will be excluded from the calculation of the weighted parameters.
-        Note on Step 4:
-            some gssurgo databases (especially in New Mexico and a few other states) contain horizons where no
+        Note on Step 4 (texture group selection):
+            In the gSSURGO database, a horizon can have multiple texture groups, and the one
+            with rvindicator = "Yes" is used (there should be only one RV group per horizon).
+            However, some databases (e.g., gSSURGO New Mexico) contain horizons where no
             texture group is flagged RV, and a few horizons with no texture group at all.
-            The fallback selection prefers a texture that AGWA can consume (i.e., present in kin_lut); 
+            See the handling notes at the top of this file. The fallback selection prefers
+            a texture that AGWA can consume (i.e., present in kin_lut); this is a pragmatic
+            choice, since these horizons have no NRCS-designated representative group.
         Note on Step 6:
             Ksat, G, Porosity, Sand, Silt, Clay, SMax, CV, and Distribution are sourced
             from the kin_lut table by texture. Rock and kwfact come from SSURGO.
     """
- 
+    tweet("Querying soil parameters.")
+
     df_horizon_parameters_all = pd.DataFrame()
     textures_list_not_usda_type = []
     textures_list_not_in_kinlut = []
     horizons_without_texture_group = []   # no rows in chtexturegrp
     horizons_without_rv_group = []        # rows exist, none flagged rvindicator = "Yes"
     horizons_without_texture = []         # selected group has no rows in chtexture
- 
-    kin_lut_textures = df_kin_lut.TextureName.values
- 
-    def resolve_texture(chtgkey):
-        """Resolve the texture name for a texture group from the chtexture table.
-        Returns None if the texture group has no rows in chtexture."""
-        df_texture_filtered = df_texture[df_texture["chtgkey"] == chtgkey]
-        if df_texture_filtered.empty:
-            return None
-        texture = df_texture_filtered.texcl.values[0]
-        if texture == "None":
-            texture = df_texture_filtered.lieutex.values[0]
-        return texture
- 
-    tweet("Querying soil parameters.")
+    kin_lut_textures = df_kin_lut.TextureName.values  
  
     df_component.mukey = df_component.mukey.astype(str)
     df_mapunit.mukey = df_mapunit.mukey.astype(str)
@@ -428,7 +585,8 @@ def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group
  
             df_horizon_filtered = df_horizon[
                 (df_horizon["cokey"] == component_id) &
-                (df_horizon["hzdept_r"] < max_thickness)].sort_values(by='hzdept_r', ascending=True)
+                (df_horizon["hzdept_r"] < max_thickness)].sort_values(
+                    by='hzdept_r', ascending=True)
  
             if df_horizon_filtered.empty:
                 continue
@@ -436,7 +594,9 @@ def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group
             if max_horizons > 0:
                 df_horizon_filtered = df_horizon_filtered.head(max_horizons)
             else:
-                raise Exception(f"The maximum number of horizons must be greater than 0. Current value is {max_horizons}.")
+                raise Exception(
+                    f"The maximum number of horizons must be greater than 0. "
+                    f"Current value is {max_horizons}.")
  
             # Step 3: Loop 3, process each horizon
             for horizon_count, (_, row) in enumerate(df_horizon_filtered.iterrows(), start=1):
@@ -444,7 +604,8 @@ def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group
                 horizon_id = row.chkey
  
                 # Step 4: select the texture group for this horizon
-                df_texture_group_filtered = df_texture_group[df_texture_group["chkey"] == horizon_id]
+                df_texture_group_filtered = df_texture_group[
+                    df_texture_group["chkey"] == horizon_id]
  
                 # Case 3: no texture group at all -> skip the horizon
                 if df_texture_group_filtered.empty:
@@ -455,17 +616,21 @@ def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group
                     df_texture_group_filtered["rvindicator"].str.strip().str.lower() == "yes"]
  
                 if not df_rv_yes.empty:
-                    # Case 1: original
+                    # Case 1: original behavior (it should be only one RV texture group
+                    # per horizon, but just in case, used .iloc[0])
                     selected_group = df_rv_yes.iloc[0]
                 else:
                     # Case 2: no RV-flagged group, fallback to the first texture group.
-                    # prefer the first group whose texture in AGWA kin_lut.
+                    # Sort by chtgkey so the choice is reproducible across runs, then
+                    # prefer the first group whose texture AGWA can consume (in kin_lut).
                     horizons_without_rv_group.append(horizon_id)
                     df_sorted = df_texture_group_filtered.sort_values("chtgkey")
                     selected_group = None
                     for _, texture_group_row in df_sorted.iterrows():
-                        candidate_texture = resolve_texture(texture_group_row["chtgkey"])
-                        if candidate_texture is not None and candidate_texture in kin_lut_textures:
+                        candidate_texture = resolve_texture(
+                            df_texture, texture_group_row["chtgkey"])
+                        if (candidate_texture is not None and 
+                            candidate_texture in kin_lut_textures):
                             selected_group = texture_group_row
                             break
                     if selected_group is None:
@@ -476,16 +641,18 @@ def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group
                 selected_texture_desc = selected_group["texdesc"]
  
                 # Step 5: get texture from texture table
-                texture = resolve_texture(selected_chtgkey)
+                texture = resolve_texture(df_texture, selected_chtgkey)
                 # Case 4: selected group has no rows in chtexture -> skip the horizon
                 if texture is None:
                     horizons_without_texture.append(horizon_id)
                     continue
  
                 # Step 6: Query parameters from horizon table and the kin_lut table
-                df_horizon_parameters = query_soil_horizon_parameters(row, horizon_count, max_horizons)
+                df_horizon_parameters = query_soil_horizon_parameters(
+                    row, horizon_count, max_horizons)
                 texture_is_usda_type, texture_in_kinlut, df_horizon_parameters = (
-                    query_kin_lut_update_horizon_parameters(df_kin_lut, texture, df_horizon_parameters))
+                    query_kin_lut_update_horizon_parameters(
+                        df_kin_lut, texture, df_horizon_parameters))
  
                 if not texture_is_usda_type and texture not in textures_list_not_usda_type:
                     textures_list_not_usda_type = textures_list_not_usda_type + [texture]
@@ -494,8 +661,8 @@ def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group
                     textures_list_not_in_kinlut = textures_list_not_in_kinlut + [texture]
  
                 # Step 7: Assign Pave, Sand, Clay, and Silt for Pave textures
-                PAVE_texture_list = ["WB", "UWB", "ICE", "CEM", "IND", "GYP", "BR", "CEM_BR", "VAR"]
-                #TODO: update list for PAVE
+                PAVE_texture_list = [
+                    "WB", "UWB", "ICE", "CEM", "IND", "GYP", "BR", "CEM_BR", "VAR"]
                 if selected_texture_class in PAVE_texture_list:
  
                     df_horizon_parameters["Pave"] = 1
@@ -513,38 +680,56 @@ def query_soil_parameters(df_mapunit, df_component, df_horizon, df_texture_group
                 df_horizon_parameters.insert(0, "ComponentPercentage", ComponentPercentage)
                 df_horizon_parameters.insert(0, "ComponentCokey", component_id)
                 df_horizon_parameters.insert(0, "MapUnitMukey", mukey)
-                df_horizon_parameters_all = pd.concat([df_horizon_parameters_all,
-                                                df_horizon_parameters], axis=0, ignore_index=True)
+                df_horizon_parameters_all = pd.concat(
+                    [df_horizon_parameters_all, df_horizon_parameters], 
+                    axis=0, ignore_index=True)
  
     # Report data-quality issues once, after all loops
     if horizons_without_rv_group:
-        tweet(f"   Warning: {len(horizons_without_rv_group)} horizon(s) in the watershed have texture "
-              f"groups but none flagged with rvindicator = 'Yes'. For each, the first texture group "
-              f"(sorted by chtgkey) with a texture found in the AGWA lookup table was used instead.\n"
-              f"   Affected chkeys: {', '.join(map(str, horizons_without_rv_group))}")
+            msg = (
+                f"   Warning: {len(horizons_without_rv_group)} horizon(s) in the watershed "
+                f"have texture groups but none flagged with rvindicator = 'Yes'. For each, "
+                f"the first texture group (sorted by chtgkey) with a texture found in "
+                f"the AGWA lookup table was used instead.\n"
+                f"   Affected chkeys: {', '.join(map(str, horizons_without_rv_group))}"
+            )
+            tweet(msg)
+
     if horizons_without_texture_group:
-        tweet(f"   Warning: {len(horizons_without_texture_group)} horizon(s) in the watershed have no "
-              f"texture group in the chtexturegrp table and were skipped in the parameter calculation.\n"
-              f"   Affected chkeys: {', '.join(map(str, horizons_without_texture_group))}")
+        msg = (
+            f"   Warning: {len(horizons_without_texture_group)} horizon(s) in the watershed "
+            f"have no texture group in the chtexturegrp table and were skipped in "
+            f"the parameter calculation.\n"
+            f"   Affected chkeys: {', '.join(map(str, horizons_without_texture_group))}"
+        )
+        tweet(msg)
+
     if horizons_without_texture:
-        tweet(f"   Warning: {len(horizons_without_texture)} horizon(s) have a texture group with no "
-              f"texture in the chtexture table and were skipped in the parameter calculation.\n"
-              f"   Affected chkeys: {', '.join(map(str, horizons_without_texture))}")
- 
+        msg = (
+            f"   Warning: {len(horizons_without_texture)} horizon(s) have a texture group "
+            f"with no texture in the chtexture table and were skipped in the parameter "
+            f"calculation.\n"
+            f"   Affected chkeys: {', '.join(map(str, horizons_without_texture))}"
+        )
+        tweet(msg)
     if textures_list_not_in_kinlut:
         textures_not_in_kinlut_string = ", ".join(textures_list_not_in_kinlut)
-        raise Exception(f"   Can not proceed because the following textures in the watershed "
-                        f"do not match any in AGWA lookup table:\n      {textures_not_in_kinlut_string}.")
+        raise Exception(
+            f"   Can not proceed because the following textures in the watershed "
+            f"do not match any in AGWA lookup table:\n"
+            f"      {textures_not_in_kinlut_string}.")
     if textures_list_not_usda_type:
         textures_not_usda_string = ", ".join(textures_list_not_usda_type)
-        tweet(f"   Textures in watershed not matching the 12 standard USDA types:\n      {textures_not_usda_string}.")
+        tweet(f"   Textures in watershed not matching the 12 standard USDA types:\n"
+              f"      {textures_not_usda_string}.")
  
     return df_horizon_parameters_all
 
 
 
-def save_results(workspace, delineation_name, discretization_name, parameterization_name, save_intermediate_outputs,
-                df_horizon_parameters, df_weighted_by_horizon, df_weighted_by_component):
+def save_results(workspace, delineation_name, discretization_name, parameterization_name, 
+                save_intermediate_outputs, df_horizon_parameters, df_weighted_by_horizon, 
+                df_weighted_by_component):
     """Save the results to the workspace geodatabase. Called in parameterize function.
     To make sure the correct datatype, use insertrow instead of converting to table from csv """
     
@@ -552,20 +737,28 @@ def save_results(workspace, delineation_name, discretization_name, parameterizat
     table_names = ["parameters_soil_weighted_by_component"]
     if save_intermediate_outputs:
         df_to_save = df_to_save + [df_horizon_parameters, df_weighted_by_horizon]
-        table_names = table_names + ["parameters_soil_horizons", "parameters_soil_weighted_by_horizon"]
-   
+        table_names.extend([
+            "parameters_soil_horizons",
+            "parameters_soil_weighted_by_horizon",
+        ])  
     for df, table_name in zip(df_to_save, table_names):
         df.insert(0, "DelineationName", delineation_name)
         df.insert(1, "ParameterizationName", parameterization_name)
         df.insert(2, "DiscretizationName", discretization_name)
-        df = df.assign(CreationDate=datetime.now().isoformat(), AGWAVersionAtCreation=config.AGWA_VERSION,
-                       AGWAGDBVersionAtCreation=config.AGWAGDB_VERSION, Status="X")
+        df = df.assign(
+            CreationDate=datetime.now().isoformat(), 
+            AGWAVersionAtCreation=config.AGWA_VERSION,
+            AGWAGDBVersionAtCreation=config.AGWAGDB_VERSION, 
+            Status="X")
 
         # define field types. To be safe, ComponentPercentage and HorizonThickness are set to DOUBLE.
-        Text_fields = ["DelineationName", "ParameterizationName", "DiscretizationName", "HorizonName",
-                       "Texture", "TextureClass", "TextureDesc", "CreationDate", "AGWAVersionAtCreation", 
-                       "AGWAGDBVersionAtCreation", "Status"]
-        Long_fields = ["MapUnitMukey", "ComponentCokey", "HorizonChkey", "HorizonNumber", "TextureGroupChtgkey"]
+        Text_fields = [
+            "DelineationName", "ParameterizationName", "DiscretizationName", "HorizonName",
+            "Texture", "TextureClass", "TextureDesc", "CreationDate", "AGWAVersionAtCreation", 
+            "AGWAGDBVersionAtCreation", "Status"]
+        Long_fields = [
+            "MapUnitMukey", "ComponentCokey", "HorizonChkey", "HorizonNumber", 
+            "TextureGroupChtgkey"]
 
         # create table if not exists
         arcgis_table = os.path.join(workspace, table_name)
@@ -585,7 +778,11 @@ def save_results(workspace, delineation_name, discretization_name, parameterizat
 
 
 def query_soil_horizon_parameters(row, horizon_count, max_horizons):
-    """Query soil horizon parameters. Called in intersect_soils function."""
+    """Query soil horizon parameters from the SSURGO chorizon table.
+    Only horizon geometry (depths/thickness), Rock, and kwfact come from SSURGO.
+    Hydraulic and texture parameters (Ksat, G, Porosity, Sand, Silt, Clay) are
+    assigned later from the kin_lut table in query_kin_lut_update_horizon_parameters.
+    Called in intersect_soils function."""
  
     try:
         horizon_id = row.chkey
@@ -636,24 +833,29 @@ def calculate_weighted_hillslope_soil_parameters(df):
         cokey_with_missing_horizons.append(component_id)
     In the gSSURGO_CA database, hzdept_r seems to be always less than hzdepb_r, 
     therefore thickness is always positive.
-    Similarly, comppct_r is always positive, so total_component_pct will always be positive.
-    However, a check is added to ensure that the total thickness is not positive.
+    Similarly, comppct_r is always positive, so total_component_pct
+    will always be positive. However, a check is added to ensure that the 
+    total thickness is not positive.
     """
 
     number_of_horizons_with_nonpositive_thickness = sum(df.HorizonThickness<0)
     if number_of_horizons_with_nonpositive_thickness > 0:
-        tweet((f"Warning: {number_of_horizons_with_nonpositive_thickness} horizons have non-positive thickness."
-               "These horizons will be ignored in the calculation of weighted parameters."))
+        tweet(
+            (f"Warning: {number_of_horizons_with_nonpositive_thickness} horizons "
+             "have non-positive thickness. These horizons will be ignored in the "
+             "calculation of weighted parameters."))
     df = df[df.HorizonThickness > 0]
     
     number_of_components_with_nonpositive_pct = sum(df.ComponentPercentage<0)
     if number_of_components_with_nonpositive_pct > 0:
-        tweet((f"Warning: {number_of_components_with_nonpositive_pct} components have non-positive percentage."
-               "These components will be ignored in the calculation of weighted parameters."))
+        tweet(
+            (f"Warning: {number_of_components_with_nonpositive_pct} components "
+             " have non-positive percentage.These components will be ignored in "
+             "the calculation of weighted parameters."))
     df = df[df.ComponentPercentage > 0]
 
-    parameters = ["Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Pave", 
-                  "SMax", "CV", "Distribution"]
+    parameters = ["Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", 
+                  "Splash", "Cohesion", "Pave", "SMax", "CV", "Distribution"]
 
     df_weighted_horizon = pd.DataFrame()
     df_weighted_component = pd.DataFrame()
@@ -661,9 +863,11 @@ def calculate_weighted_hillslope_soil_parameters(df):
     def weight_parameters(group, weight_column):
         weighted_par = pd.Series()
         for param in parameters:
-            weighted_par[param] = (group[param] * group[weight_column]).sum() / group[weight_column].sum()
+            weighted_par[param] = (
+                (group[param] * group[weight_column]).sum() / group[weight_column].sum())
         # weight the texture factions, so that they sum to 1
-        total_particle = weighted_par['Sand'] + weighted_par['Silt'] + weighted_par['Clay']
+        total_particle = (
+            weighted_par['Sand'] + weighted_par['Silt'] + weighted_par['Clay'])
         if total_particle != 0:
             weighted_par['Sand'] /= total_particle
             weighted_par['Silt'] /= total_particle
@@ -680,16 +884,21 @@ def calculate_weighted_hillslope_soil_parameters(df):
                 df_weighted_values.insert(0, "MapUnitMukey", mukey)
                 df_weighted_values.insert(1, "ComponentCokey", component_id)
                 df_weighted_values.insert(2, "HorizonChkey", horizon_id)
-                df_weighted_values.insert(3, "TotalHorizonThickness", df_horizon["HorizonThickness"].sum())                
-                df_weighted_values.insert(4, "ComponentPercentage", df_horizon["ComponentPercentage"].values[0])
-                df_weighted_horizon = pd.concat([df_weighted_horizon, df_weighted_values], axis=0, ignore_index=True)
+                df_weighted_values.insert(
+                    3, "TotalHorizonThickness", df_horizon["HorizonThickness"].sum())                
+                df_weighted_values.insert(
+                    4, "ComponentPercentage", df_horizon["ComponentPercentage"].values[0])
+                df_weighted_horizon = pd.concat(
+                    [df_weighted_horizon, df_weighted_values], axis=0, ignore_index=True)
     
     for mukey in df_weighted_horizon.MapUnitMukey.unique():
         df_component = df_weighted_horizon[df_weighted_horizon.MapUnitMukey == mukey]
         df_weighted_values = weight_parameters(df_component, "ComponentPercentage")
         df_weighted_values.insert(0, "MapUnitMukey", mukey)
-        df_weighted_values.insert(1, "TotalComponentPercentage", df_component["ComponentPercentage"].sum())   
-        df_weighted_component = pd.concat([df_weighted_component, df_weighted_values], axis=0, ignore_index=True)
+        df_weighted_values.insert(
+            1, "TotalComponentPercentage", df_component["ComponentPercentage"].sum())   
+        df_weighted_component = pd.concat(
+            [df_weighted_component, df_weighted_values], axis=0, ignore_index=True)
     
     return df_weighted_horizon, df_weighted_component
 
@@ -699,14 +908,15 @@ def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, df_horizon_para
         It is called within the 'intersect_soils' function.
         Additionally, it computes 'splash' and 'cohesion' based on kwfact (from SSURGO)
         and clay (from the 'kin_lut' table).
-        Note: the 'kin_lut' table is the source for Ksat, G, Porosity, Sand, Silt,
-        Clay, SMax, CV, DIS."""
+        Note: the 'kin_lut' table is the sole source for Ksat, G, Porosity, Sand, Silt,
+        Clay, SMax, CV, and Distribution."""
  
     # check if the texture is in the USDA standard texture list, or in the kin_lut table
     texture_is_usda_standard = True
     texture_is_in_kin_lut = True
-    usda_standard_texture_lower = ["clay", "clay loam", "loam", "loamy sand", "sand", "sandy clay",
-            "sandy clay loam", "sandy loam", "silt", "silt loam", "silty clay", "silty clay loam"]
+    usda_standard_texture_lower = [
+        "clay", "clay loam", "loam", "loamy sand", "sand", "sandy clay", "sandy clay loam", 
+        "sandy loam", "silt", "silt loam", "silty clay", "silty clay loam"]
     if texture.lower() not in usda_standard_texture_lower:
         texture_is_usda_standard = False
  
@@ -731,7 +941,8 @@ def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, df_horizon_para
     kin_kff = kin_par.KFF  # fallback for kwfact when kwfact is 0
  
     # TODO from Shea: document the splash and cohesion equations by adding references
-    # calculate splash based on kwfact (from SSURGO). modify if kf is 0 or kin_kff is negative
+    # calculate splash based on kwfact (from SSURGO). 
+    # modify if kf is 0 or kin_kff is negative
     kf = float(df_horizon_parameters["kwfact"].iloc[0])
     if kf == 0:
         if kin_kff <= 0:
@@ -758,11 +969,11 @@ def query_kin_lut_update_horizon_parameters(df_kin_lut, texture, df_horizon_para
     return texture_is_usda_standard, texture_is_in_kin_lut, df_horizon_parameters
 
 
-def weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, discretization_name,
-                                                 parameterization_name, intersect_feature_class):
-    """Weight soil parameters for each hillslope based on the intersection of hillslopes and soils. 
-        14 parameters are weighted.
-        called in parameterize function."""
+def weight_hillsope_parameters_by_area_fractions(
+    workspace, delineation_name, discretization_name, parameterization_name, 
+    intersect_feature_class):
+    """Weight soil parameters for each hillslope based on the intersection of 
+    hillslopes and soils. 14 parameters are weighted."""
     
     # Step 1: read 2 tables    
     soils_table = os.path.join(workspace, "parameters_soil_weighted_by_component")
@@ -772,22 +983,35 @@ def weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, di
                         (df_soils["ParameterizationName"] == parameterization_name)]
     
     # soil_feature_class_name = os.path.basename(soil_layer)
-    # intersection_table = os.path.join(workspace, f"{discretization_name}_{soil_feature_class_name}_intersection")
-    df_intersections = pd.DataFrame(arcpy.da.TableToNumPyArray(intersect_feature_class, 
-                                                               ["HillslopeID", "MUKEY", "Shape_Area"])) 
+    # save intersection_table as 
+    # f"{discretization_name}_{soil_feature_class_name}_intersection")
+    df_intersections = pd.DataFrame(
+        arcpy.da.TableToNumPyArray(intersect_feature_class, 
+                                    ["HillslopeID", "MUKEY", "Shape_Area"])) 
 
     # Step 2: Merge intersection polygons with soils
     df_soils.MapUnitMukey = df_soils.MapUnitMukey.astype(str)
     df_intersections.MUKEY = df_intersections.MUKEY.astype(str)
-    # here to assign values so it won't be NaN #TODO: add a warning or error if there are missing_mukeys
-    missing_mukeys = df_intersections[~df_intersections["MUKEY"].isin(df_soils["MapUnitMukey"])].MUKEY.unique()
-    
-    df_intersections_soils = pd.merge(df_intersections, df_soils, left_on="MUKEY", right_on="MapUnitMukey", how="left")
+    missing_mukeys = df_intersections[
+            ~df_intersections["MUKEY"].isin(df_soils["MapUnitMukey"])]["MUKEY"].unique()
+
+    if len(missing_mukeys) > 0:
+        missing_str = ", ".join(missing_mukeys)
+        tweet(
+            f"   Warning: {len(missing_mukeys)} MUKEY(s) present in the hillslope "
+            f"intersection raster/polygon were not found in the processed soils table.\n"
+            f"   Missing MUKEYs: {missing_str}"
+        )    
+    df_intersections_soils = pd.merge(
+        df_intersections, df_soils, left_on="MUKEY", right_on="MapUnitMukey", how="left")
     
     # Step 3: Weight soil parameters by area fractions
-    parameters = ["Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Pave",
-                   "SMax", "CV", "Distribution"]
-    df_weighted_by_area = pd.DataFrame().assign(HillslopeID=df_intersections_soils.HillslopeID.unique())
+    parameters = [
+        "Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Pave",
+        "SMax", "CV", "Distribution"]
+    df_weighted_by_area = pd.DataFrame().assign(
+        HillslopeID=df_intersections_soils.HillslopeID.unique())
+
     for hillsope_id in df_intersections_soils.HillslopeID.unique():
         df_hillslope = df_intersections_soils[df_intersections_soils.HillslopeID == hillsope_id]
         
@@ -800,8 +1024,10 @@ def weight_hillsope_parameters_by_area_fractions(workspace, delineation_name, di
 
         total_area = df_hillslope.Shape_Area.sum()
         for param in parameters:
-            weighted_value = (df_hillslope[param] * df_hillslope.Shape_Area).sum() / total_area
-            df_weighted_by_area.loc[df_weighted_by_area.HillslopeID == hillsope_id, param] = weighted_value
+            weighted_value = (
+                df_hillslope[param] * df_hillslope.Shape_Area).sum() / total_area
+            df_weighted_by_area.loc[
+                df_weighted_by_area.HillslopeID == hillsope_id, param] = weighted_value
 
     return df_weighted_by_area
 
@@ -813,11 +1039,15 @@ def extract_parameters(prjgdb, delineation_name, discretization_name, parameteri
     
     meta_parameterization_table = os.path.join(prjgdb, "metaParameterization")
     df_parameterization = pd.DataFrame(arcpy.da.TableToNumPyArray(meta_parameterization_table,"*"))
-    df_parameterization = df_parameterization[(df_parameterization["DelineationName"] == delineation_name) &
-                                        (df_parameterization["DiscretizationName"] == discretization_name) &
-                                        (df_parameterization["ParameterizationName"] == parameterization_name)].squeeze()
+    df_parameterization = df_parameterization[
+        (df_parameterization["DelineationName"] == delineation_name) &
+        (df_parameterization["DiscretizationName"] == discretization_name) &
+        (df_parameterization["ParameterizationName"] == parameterization_name)].squeeze()
+
     if df_parameterization.empty:
-        raise Exception(f"No parameterization found for the given delineation, discretization, and parameterization names.")
+        raise Exception(
+            f"No parameterization found for the given delineation, discretization, "
+            "and parameterization names.")
     
     max_thickness = int(df_parameterization["MaxThickness"])
     max_horizons = int(df_parameterization["MaxHorizons"])
@@ -839,8 +1069,9 @@ def extract_parameters(prjgdb, delineation_name, discretization_name, parameteri
              AGWA_directory, channel_type)
 
 
-def copy_parameterization(workspace, delineation_name, discretization_name, previous_parameterization_name,
-                           parameterization_name):
+def copy_parameterization(
+    workspace, delineation_name, discretization_name, previous_parameterization_name,
+    parameterization_name):
     
     """Copy parameterization from previous to new parameterization. Called in parameterize function.
     Note: element parameterization should be done before this step. 
@@ -850,28 +1081,38 @@ def copy_parameterization(workspace, delineation_name, discretization_name, prev
     tweet(f"Copying parameterization from '{previous_parameterization_name}' to '{parameterization_name}'.")
     tables = ["parameters_hillslopes", "parameters_channels"]
     index_fields = ["HillslopeID", "ChannelID"]
-    hillslope_fields_copy = ["Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", 
-                             "Pave", "SMax", "CV", "Distribution", "Canopy", "Interception", 
-                             "Manning", "Imperviousness"]
-    channel_feilds_copy = ["Ksat", "Manning", "Pave", "Imperviousness", "SMax", "CV", "G", "Porosity", 
-                           "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Distribution", "Woolhiser"]
+    hillslope_fields_copy = [
+        "Ksat", "G", "Porosity", "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", 
+        "Pave", "SMax", "CV", "Distribution", "Canopy", "Interception", 
+        "Manning", "Imperviousness"]
+    channel_feilds_copy = [
+        "Ksat", "Manning", "Pave", "Imperviousness", "SMax", "CV", "G", "Porosity", 
+        "Rock", "Sand", "Silt", "Clay", "Splash", "Cohesion", "Distribution", "Woolhiser"]
 
     
-    for table, fields_to_copy, index_field in zip(tables, [hillslope_fields_copy, channel_feilds_copy], 
-                                                  index_fields):
+    for table, fields_to_copy, index_field in zip(
+        tables, [hillslope_fields_copy, channel_feilds_copy], index_fields):
 
         try:
             table_path = arcpy.os.path.join(workspace, table)
             field_objects = arcpy.ListFields(table_path)
             all_fields = [field.name for field in field_objects if field.type != 'OID']
-            cols_to_load = [index_field] + fields_to_copy + ["DelineationName", "DiscretizationName", 
-                                                             "ParameterizationName"]
+            cols_to_load = [
+                index_field,
+                *fields_to_copy,
+                "DelineationName",
+                "DiscretizationName",
+                "ParameterizationName",
+            ]
+
             df = pd.DataFrame(arcpy.da.TableToNumPyArray(table_path, cols_to_load))
             
-            previous_data_set = df[(df["DelineationName"] == delineation_name) & 
-                                   (df["DiscretizationName"] == discretization_name) &
-                                   (df["ParameterizationName"] == previous_parameterization_name)]
-            previous_data_set = previous_data_set.set_index(index_field)[fields_to_copy].to_dict(orient='index')
+            previous_data_set = df[
+                (df["DelineationName"] == delineation_name) & 
+                (df["DiscretizationName"] == discretization_name) &
+                (df["ParameterizationName"] == previous_parameterization_name)]
+            previous_data_set = previous_data_set.set_index(index_field)[
+                fields_to_copy].to_dict(orient='index')
 
             field_indices = {field: all_fields.index(field) for field in fields_to_copy}
 
@@ -902,8 +1143,8 @@ def is_raster_larger_and_buffer(raster, watershed_feature_class):
     raster_spatial_ref = arcpy.Describe(raster).spatialReference
     watershed_spatial_ref = arcpy.Describe(watershed_feature_class).spatialReference
     if raster_spatial_ref.factoryCode != watershed_spatial_ref.factoryCode:
-        watershed_projected = arcpy.management.Project(watershed_feature_class, 
-                                        "in_memory/watershed_projected", raster_spatial_ref)
+        watershed_projected = arcpy.management.Project(
+            watershed_feature_class, "in_memory/watershed_projected", raster_spatial_ref)
     else:
         watershed_projected = watershed_feature_class
     
@@ -928,7 +1169,8 @@ def is_raster_larger_and_buffer(raster, watershed_feature_class):
     watershed_prj_width = watershed_prj_extent.XMax - watershed_prj_extent.XMin
     watershed_prj_height = watershed_prj_extent.YMax - watershed_prj_extent.YMin
     
-    # Determine if the raster is larger than the watershed by the specified threshold in both dimensions
+    # Determine if the raster is larger than the watershed by the specified threshold 
+    # in both dimensions.
     # Using "or" allows for a buffer if the raster is larger in one dimension
     # Using "and" allows for a buffer if the raster is larger in both dimensions
     # The buffer size is calculated based on original watershed feature class
@@ -955,12 +1197,15 @@ def convert_soil_raster_to_polygon(raster, watershed_feature_class, delineation,
     if buffer_size:
         watershed_buffer = os.path.join(workspace, f"{delineation}_buffer")
         if not arcpy.Exists(watershed_buffer):            
-            arcpy.analysis.Buffer(watershed_feature_class, watershed_buffer, f"{buffer_size} Meters", 
-                                "FULL", "ROUND", "NONE", None, "PLANAR")        
+            arcpy.analysis.Buffer(
+                watershed_feature_class, watershed_buffer, f"{buffer_size} Meters", 
+                "FULL", "ROUND", "NONE", None, "PLANAR")        
         clipped_soil_raster = os.path.join(workspace, f"soil_raster_clipped")
         if not arcpy.Exists(clipped_soil_raster):
             tweet(f"Clipping soil raster.")
-            arcpy.Clip_management(raster, "", clipped_soil_raster, watershed_buffer, "", "ClippingGeometry")            
+            arcpy.Clip_management(
+                raster, "", clipped_soil_raster, watershed_buffer, "", 
+                "ClippingGeometry")            
     else:
         clipped_soil_raster = raster
 
@@ -968,7 +1213,8 @@ def convert_soil_raster_to_polygon(raster, watershed_feature_class, delineation,
     sr1 = arcpy.Describe(clipped_soil_raster).spatialReference
     sr2 = arcpy.Describe(watershed_feature_class).spatialReference
     if sr1.name != sr2.name:
-        prj_lc_raster = os.path.join(workspace, f"{os.path.basename(clipped_soil_raster)}_prj")
+        prj_lc_raster = os.path.join(
+            workspace, f"{os.path.basename(clipped_soil_raster)}_prj")
         arcpy.management.ProjectRaster(clipped_soil_raster, prj_lc_raster, sr2)
     else:
         prj_lc_raster = clipped_soil_raster
