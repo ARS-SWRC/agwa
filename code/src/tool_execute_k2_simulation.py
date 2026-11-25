@@ -50,8 +50,13 @@ class ExecuteK2Simulation(object):
                                  parameterType="Derived",
                                  direction="Output")
 
+        param4 = arcpy.Parameter(displayName="Models Directory",
+                                 name="Models_Directory",
+                                 datatype="GPString",
+                                 parameterType="Derived",
+                                 direction="Output")
 
-        params = [param0, param1, param2, param3]
+        params = [param0, param1, param2, param3, param4]
         return params
 
     def isLicensed(self):
@@ -63,7 +68,7 @@ class ExecuteK2Simulation(object):
         validation is performed.  This method is called whenever a parameter
         has been changed."""
 
-        workspace, prjgdb, discretization_list = "", "", []
+        workspace, prjgdb, agwa_directory, discretization_list = "", "", "", []
         if parameters[0].value:
             delineation_name = parameters[0].valueAsText
             project = arcpy.mp.ArcGISProject("CURRENT")
@@ -80,6 +85,14 @@ class ExecuteK2Simulation(object):
                                     break         
 
             for table in m.listTables():
+                if table.name == "metaWorkspace":
+                    with arcpy.da.SearchCursor(table, ["AGWADirectory", "ProjectGeoDataBase"]) as cursor:
+                        for row in cursor:
+                            if row[1] == prjgdb:
+                                agwa_directory = row[0]
+                        break
+
+            for table in m.listTables():
                 if table.name == "metaDiscretization":
                     with arcpy.da.SearchCursor(table, ["DelineationName", "DiscretizationName"]) as cursor:
                         for row in cursor:
@@ -89,6 +102,7 @@ class ExecuteK2Simulation(object):
         
             parameters[1].filter.list = discretization_list
             parameters[3].value = workspace
+            parameters[4].value = os.path.join(agwa_directory, "models") if agwa_directory else ""
 
         if parameters[1].value and parameters[3].value:
             discretization_name = parameters[1].valueAsText
@@ -132,16 +146,39 @@ class ExecuteK2Simulation(object):
         discretization_par = parameters[1].valueAsText
         simulation_par = parameters[2].valueAsText
         workspace_par = parameters[3].valueAsText
+        models_directory_par = parameters[4].valueAsText or ""
 
         workspace_directory = os.path.split(workspace_par)[0]
         simulation_directory = os.path.join(workspace_directory, "modeling_files", discretization_par, "simulations", simulation_par)
 
         if not os.path.isdir(simulation_directory):
             arcpy.AddError(f"{simulation_directory} is not a valid directory.")
-        else:
-            k2_path = os.path.join(simulation_directory, "k2.exe -b")
-            subprocess.Popen(["start", "cmd", "/k", k2_path +
-                              " && echo Press any key to close this window && pause >nul && exit"], shell=True, cwd=simulation_directory)
+            return
+
+        k2_exe = os.path.join(models_directory_par, "k2.exe") if models_directory_par else ""
+        if not os.path.isfile(k2_exe):
+            # Simulations written by earlier AGWA versions carry their own copy of k2.exe.
+            legacy_exe = os.path.join(simulation_directory, "k2.exe")
+            if os.path.isfile(legacy_exe):
+                k2_exe = legacy_exe
+            else:
+                arcpy.AddError(f"k2.exe was not found in the models directory "
+                               f"({models_directory_par}) or in {simulation_directory}.")
+                return
+
+        # KINEROS2 reads kin.fil from its current working directory and resolves the
+        # parameter, precipitation, and output file names in it relative to that
+        # directory, so only the working directory has to be the simulation directory.
+        # The executable itself can stay in the AGWA models directory.
+        arcpy.AddMessage(f"Running {k2_exe} in {simulation_directory}\n")
+        # The command is passed to Popen as a single string on purpose. A list would be
+        # escaped by subprocess.list2cmdline, which turns the inner quotes into \" and
+        # cmd.exe does not understand that form. cmd /s strips only the outermost pair
+        # of quotes, so the quoted executable path survives paths containing spaces.
+        command = (f'cmd /s /k ""{k2_exe}" -b '
+                   f'&& echo Press any key to close this window && pause >nul && exit"')
+        subprocess.Popen(command, cwd=simulation_directory,
+                         creationflags=subprocess.CREATE_NEW_CONSOLE)
 
         return
 

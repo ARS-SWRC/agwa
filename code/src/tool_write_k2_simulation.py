@@ -247,6 +247,8 @@ class WriteK2Simulation(object):
         precipitation_file = os.path.join(modeling_files_directory, "precipitation_files", precipitation_file)
         simulation_directory = os.path.join(modeling_files_directory,  "simulations", simulation_name)
         k2_file = os.path.join(models_directory, "k2.exe")
+        if not os.path.isfile(k2_file):
+            raise Exception(f"k2.exe was not found in the models directory: {models_directory}")
         
         arcpy.AddMessage(f"Creating the simulation directory and subdirectories if they do not exist.\n")
         if not os.path.exists(simulation_directory):
@@ -262,10 +264,10 @@ class WriteK2Simulation(object):
                 if not os.path.exists(path):
                     os.mkdir(path)
             
-        arcpy.AddMessage(f"Copying the precipitation file, parameter file, and K2 executable into the simulation directory\n")
+        arcpy.AddMessage(f"Copying the precipitation file and parameter file into the simulation directory\n")
         shutil.copy2(parameter_file, simulation_directory)
         shutil.copy2(precipitation_file, simulation_directory)
-        shutil.copy2(k2_file, simulation_directory)
+
 
         arcpy.AddMessage(f"Creating the run file (kin.fil) for the simulation\n")
         par_name = os.path.split(parameter_file)[1]
